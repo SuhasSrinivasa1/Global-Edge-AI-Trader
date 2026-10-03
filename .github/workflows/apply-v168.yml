@@ -34,8 +34,8 @@ jobs:
           tr -d '\r\n ' < patches/v168.patch.gz.b64 | base64 -d > /tmp/v168.patch.gz
           gzip -t /tmp/v168.patch.gz
           gzip -dc /tmp/v168.patch.gz > /tmp/v168.patch
-          git apply --check /tmp/v168.patch
-          git apply /tmp/v168.patch
+          git apply --check --exclude=.github/workflows/android-ci.yml /tmp/v168.patch
+          git apply --exclude=.github/workflows/android-ci.yml /tmp/v168.patch
           grep -q 'versionCode = 168' app/build.gradle.kts
           grep -q 'versionName = "1.6.8"' app/build.gradle.kts
           grep -q 'trusted_multify_package_v168' app/src/main/java/com/suhas/ucsentinel/notifications/MultifyNotificationService.kt
@@ -75,6 +75,6 @@ jobs:
           fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add .github/workflows/android-ci.yml CHANGELOG-v1.6.8.txt app
+          git add CHANGELOG-v1.6.8.txt app
           git commit -m 'Release Global Edge AI Trader v1.6.8 hardening'
           git push
