@@ -116,3 +116,5 @@ jobs:
           test -f app/build.gradle.kts
           test -f app/src/main/AndroidManifest.xml
           test -f app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
+
+# bootstrap-trigger: 2026-10-03
