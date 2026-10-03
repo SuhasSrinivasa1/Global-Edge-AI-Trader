@@ -1,6 +1,6 @@
 # Global Edge AI Trader — Canonical Repository
 
-Current canonical baseline: **v1.6.7** (`versionCode 167`).
+Current canonical baseline: **v1.6.8** (`versionCode 168`).
 
 This repository is the source of truth for Global Edge AI Trader going forward. The historical release notes below are retained from the migrated source tree for continuity. Production signing material is intentionally kept out of this public repository.
 
