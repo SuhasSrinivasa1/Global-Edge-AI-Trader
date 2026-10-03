@@ -84,6 +84,10 @@ class GlobalEdgeAITraderRepository(context:Context){
     fun tradingStaticIp()=EXPECTED_TRADING_STATIC_IP
     fun multifyEvents(limit:Int=200):List<MultifyEvent> = MultifyEventStore.recent(appContext,limit)
     fun multifyListenerEnabled():Boolean = MultifyEventStore.listenerEnabled(appContext)
+    fun multifyCandidatePackage():String = MultifyEventStore.candidatePackage(appContext)
+    fun multifyTrustedPackage():String = MultifyEventStore.trustedPackage(appContext)
+    fun trustMultifyCandidatePackage():Boolean = MultifyEventStore.trustCandidatePackage(appContext)
+    fun clearMultifyTrustedPackage() = MultifyEventStore.clearTrustedPackage(appContext)
     fun multifyShadowTrades(limit:Int=1000):List<MultifyShadowTrade> = multifyTrading.loadTrades(limit)
     fun multifyDecisions(limit:Int=400):List<MultifyDecision> = multifyTrading.loadDecisions(limit)
     fun multifyStockProfile(symbol:String):MultifyStockProfile = buildMultifyStockProfile(symbol.trim().uppercase())
@@ -290,7 +294,7 @@ class GlobalEdgeAITraderRepository(context:Context){
         return ref to oco.smartOrderId
     }
 
-    private suspend fun placeMultifyLiveOrder(symbol:String,side:String,quantity:Int,signalPrice:Double,reason:String,isExit:Boolean=false,protectionId:String=""):MultifyLiveSubmission{
+    private suspend fun placeMultifyLiveOrder(symbol:String,side:String,quantity:Int,signalPrice:Double,reason:String,isExit:Boolean=false,protectionId:String="",sourceEventId:String=""):MultifyLiveSubmission{
         val now=ZonedDateTime.now(ist)
         require(marketSessionInfo(now).isOpen){"Market is closed. Multify live orders are intraday-only."}
         require(now.toLocalTime()<LocalTime.of(15,20)||isExit){"New Multify live entries stop at 15:20 IST."}
@@ -339,9 +343,11 @@ class GlobalEdgeAITraderRepository(context:Context){
             requestedQuantity=actualQty,submittedAt=System.currentTimeMillis(),signalEntryPrice=executionPrice,status="SUBMITTING",remainingQuantity=actualQty
         )
         prefs.upsertBrokerOrder(pending)
+        if(sourceEventId.isNotBlank())MultifyEventStore.markLatency(appContext,sourceEventId,orderSubmittedAt=System.currentTimeMillis())
         DiagnosticLog.log(appContext,"MULTIFY-ORDER","$reason • ref=$referenceId • $normalizedSide $normalizedSymbol • MIS • qty=$actualQty • decision=$signalPrice executionRef=$executionPrice")
         try{
             val placed=groww.placeIntradayMarketOrder(token,normalizedSymbol,actualQty,normalizedSide,referenceId)
+            if(sourceEventId.isNotBlank())MultifyEventStore.markLatency(appContext,sourceEventId,brokerAcknowledgedAt=System.currentTimeMillis())
             val accepted=pending.copy(growwOrderId=placed.growwOrderId.ifBlank{"PENDING-"+referenceId},referenceId=placed.orderReferenceId.ifBlank{referenceId},status=placed.orderStatus.ifBlank{"ACCEPTED"},remark=placed.remark)
             prefs.saveBrokerOrders(prefs.loadBrokerOrders(500).filterNot{it.referenceId==referenceId}+accepted)
             runCatching{reconcileBrokerOrders(accepted.growwOrderId)}
@@ -360,6 +366,7 @@ class GlobalEdgeAITraderRepository(context:Context){
             val pos=runCatching{groww.getPositionBySymbol(token,normalizedSymbol)}.getOrNull()
             if(filled<=0&&pos!=null)filled=abs(pos.quantity).coerceAtMost(actualQty)
             if(avg<=0.0&&pos!=null)avg=pos.netPrice
+            if(sourceEventId.isNotBlank()&&filled>0)MultifyEventStore.markLatency(appContext,sourceEventId,firstFillAt=System.currentTimeMillis(),fullFillAt=System.currentTimeMillis().takeIf{filled>=actualQty})
             var protectionRef="";var protectionSmartId=""
             if(!isExit&&filled>0){
                 val protection=runCatching{armMultifyProtection(token,normalizedSymbol,normalizedSide,filled,avg.takeIf{it>0.0}?:executionPrice)}
@@ -1639,15 +1646,24 @@ class GlobalEdgeAITraderRepository(context:Context){
         if(symbol.isBlank())return MultifyStockProfile("",0,0,0,0.0)
         val rows=multifyTrading.loadTrades(2500).filter{it.symbol==symbol&&it.status==MultifyShadowStatus.CLOSED}
         fun stats(side:MultifyShadowSide):List<MultifyStrategyStat> = rows.filter{it.side==side}.groupBy{it.strategyTag}.map{(tag,list)->
-            val wins=list.count{it.netPnl>0.0};val losses=list.count{it.netPnl<=0.0};val avg=list.map{multifyEngine.directionalReturn(it.side,it.entryPrice,it.exitPrice)}.average().takeIf{it.isFinite()}?:0.0
-            MultifyStrategyStat(tag,side,list.size,wins,losses,if(list.isEmpty())0.0 else wins*100.0/list.size,list.sumOf{it.netPnl},avg)
-        }.sortedWith(compareByDescending<MultifyStrategyStat>{if(it.samples>=5&&it.winRatePct>=55.0)1 else 0}.thenByDescending{it.winRatePct}.thenByDescending{it.netPnl})
+            val wins=list.count{it.netPnl>0.0};val losses=list.count{it.netPnl<=0.0};val rawWin=if(list.isEmpty())0.0 else wins*100.0/list.size
+            val avg=list.map{multifyEngine.directionalReturn(it.side,it.entryPrice,it.exitPrice)}.average().takeIf{it.isFinite()}?:0.0
+            // Beta(2,2) shrinkage prevents tiny samples from becoming overconfident. A 20-session
+            // half-life keeps recent stock behaviour relevant without discarding older evidence.
+            val bayes=(wins+2.0)/(list.size+4.0)*100.0
+            val nowMs=System.currentTimeMillis();val recencyNet=list.sumOf{t->
+                val ageDays=((nowMs-(t.closedAt.takeIf{it>0L}?:t.openedAt)).coerceAtLeast(0L))/86_400_000.0
+                val weight=kotlin.math.exp(-0.6931471805599453*ageDays/20.0)
+                t.netPnl*weight
+            }
+            MultifyStrategyStat(tag,side,list.size,wins,losses,rawWin,list.sumOf{it.netPnl},avg,bayes,recencyNet)
+        }.sortedWith(compareByDescending<MultifyStrategyStat>{if(it.samples>=5&&it.bayesianWinRatePct>=55.0)1 else 0}.thenByDescending{it.bayesianWinRatePct}.thenByDescending{it.recencyWeightedNet}.thenByDescending{it.netPnl})
         val long=stats(MultifyShadowSide.LONG);val short=stats(MultifyShadowSide.SHORT)
         val events=MultifyEventStore.recent(appContext,1000).filter{it.symbol==symbol&&it.eventType==MultifyEventType.EXIT&&it.evaluatedAt>0L}
         val exitWins=events.count{it.postExitFall5mPct>=0.20||it.postExitFall15mPct>=0.35}
         return MultifyStockProfile(
             symbol=symbol,samples=rows.size,wins=rows.count{it.netPnl>0.0},losses=rows.count{it.netPnl<=0.0},netPnl=rows.sumOf{it.netPnl},
-            bestLongStrategy=long.firstOrNull{it.samples>=5&&it.winRatePct>=55.0}?.strategyTag.orEmpty(),bestShortStrategy=short.firstOrNull{it.samples>=5&&it.winRatePct>=55.0}?.strategyTag.orEmpty(),longStats=long.take(8),shortStats=short.take(8),
+            bestLongStrategy=long.firstOrNull{it.samples>=5&&it.bayesianWinRatePct>=55.0}?.strategyTag.orEmpty(),bestShortStrategy=short.firstOrNull{it.samples>=5&&it.bayesianWinRatePct>=55.0}?.strategyTag.orEmpty(),longStats=long.take(8),shortStats=short.take(8),
             exitFallSamples=events.size,exitFallWins=exitWins,avgExitFall5mPct=events.map{it.postExitFall5mPct}.average().takeIf{it.isFinite()}?:0.0,
             avgExitFall15mPct=events.map{it.postExitFall15mPct}.average().takeIf{it.isFinite()}?:0.0
         )
@@ -1663,7 +1679,7 @@ class GlobalEdgeAITraderRepository(context:Context){
         DiagnosticLog.log(appContext,"MULTIFY-SHADOW","CLOSE ${closed.side} ${closed.symbol} • ${closed.strategyTag} • gross ₹${"%.0f".format(gross)} • costs ₹${"%.0f".format(costs)} • net ₹${"%+.0f".format(net)} • $reason")
         if(row.liveEntryReference.isNotBlank()&&row.liveExitReference.isBlank()){
             val side=if(row.side==MultifyShadowSide.LONG)"SELL" else "BUY"
-            runCatching{placeMultifyLiveOrder(row.symbol,side,row.quantity,px,"AUTO_EXIT:$reason",isExit=true,protectionId=row.liveProtectionId)}.onSuccess{sub->
+            runCatching{placeMultifyLiveOrder(row.symbol,side,row.quantity,px,"AUTO_EXIT:$reason",isExit=true,protectionId=row.liveProtectionId,sourceEventId=row.sourceEventId)}.onSuccess{sub->
                 closed=closed.copy(liveExitReference=sub.referenceId,liveExecutionNote="LIVE exit submitted: $reason • brokerQty=${sub.filledQuantity}")
                 multifyTrading.upsertTrade(closed)
                 DiagnosticLog.log(appContext,"MULTIFY-LIVE","EXIT ${row.side} ${row.symbol} • broker reconciled exit • ref=${sub.referenceId} • $reason")
@@ -1705,8 +1721,15 @@ class GlobalEdgeAITraderRepository(context:Context){
         multifyTrading.upsertTrade(row)
         DiagnosticLog.log(appContext,"MULTIFY-SHADOW","OPEN ${row.side} ${row.symbol} • wave ${row.wave} • qty ${row.quantity} • ₹${"%.0f".format(row.allocatedCapital)} • ${row.strategyTag} • score ${"%.1f".format(row.score)}")
         if(prefs.loadSettings().multifyLiveTradingEnabled){
+            val sourcePackage=MultifyEventStore.find(appContext,eventId)?.packageName.orEmpty()
+            if(!MultifyEventStore.sourceTrustedForLive(appContext,sourcePackage)){
+                val shadow=row.copy(liveExecutionNote="LIVE BLOCKED: source package is not explicitly trusted for execution")
+                multifyTrading.upsertTrade(shadow)
+                DiagnosticLog.log(appContext,"MULTIFY-LIVE","ENTRY BLOCKED ${row.symbol} • untrusted source package=$sourcePackage")
+                return shadow
+            }
             val side=if(row.side==MultifyShadowSide.LONG)"BUY" else "SELL"
-            runCatching{placeMultifyLiveOrder(row.symbol,side,row.quantity,row.entryPrice,"AUTO_ENTRY:${row.strategyTag}")}.onSuccess{sub->
+            runCatching{placeMultifyLiveOrder(row.symbol,side,row.quantity,row.entryPrice,"AUTO_ENTRY:${row.strategyTag}",sourceEventId=row.sourceEventId)}.onSuccess{sub->
                 val live=row.copy(liveEntryReference=sub.referenceId,liveProtectionReference=sub.protectionReference,liveProtectionId=sub.protectionId,liveFilledQuantity=sub.filledQuantity,liveAverageEntryPrice=sub.averagePrice,liveExecutionNote="LIVE entry submitted • fill=${sub.filledQuantity}/${row.quantity} • protection=${sub.protectionId.ifBlank{"PENDING/ATTENTION"}}")
                 multifyTrading.upsertTrade(live)
                 DiagnosticLog.log(appContext,"MULTIFY-LIVE","ENTRY ${row.side} ${row.symbol} • wave ${row.wave} • intended ${row.quantity} • filled ${sub.filledQuantity} • ref=${sub.referenceId} • protection=${sub.protectionId}")
@@ -1747,6 +1770,7 @@ class GlobalEdgeAITraderRepository(context:Context){
             multifyTrading.appendDecision(d);MultifyEventStore.update(appContext,event.copy(processedAt=System.currentTimeMillis(),decisionTier=d.tier.name,decisionReason=d.reason));return@withLock d
         }
         val quote=groww.getQuote(token,event.symbol,fresh=true)
+        MultifyEventStore.markLatency(appContext,event.id,quoteReceivedAt=System.currentTimeMillis())
         val candles=runCatching{multifyCandles(token,event.symbol,now)}.getOrDefault(emptyList())
         val openOpposite=multifyTrading.loadTrades(2500).firstOrNull{it.status==MultifyShadowStatus.OPEN&&it.symbol==event.symbol}
         when(event.eventType){
@@ -1759,7 +1783,8 @@ class GlobalEdgeAITraderRepository(context:Context){
         var d=multifyEngine.decide(event.id,event.symbol,event.eventType,quote,candles,profile,event.capturedAt/1000L)
         if(d.direction==MultifyShadowSide.SHORT&&!inst.sellAllowed){d=d.copy(tier=MultifyDecisionTier.NO_TRADE,reason=d.reason+" • short not intraday-eligible")}
         multifyTrading.appendDecision(d)
-        MultifyEventStore.update(appContext,event.copy(processedAt=System.currentTimeMillis(),decisionTier=d.tier.name,decisionDirection=d.direction?.name.orEmpty(),decisionScore=d.score,decisionPrice=d.price,decisionStrategy=d.strategyTag,decisionReason=d.reason))
+        val decisionDone=System.currentTimeMillis()
+        MultifyEventStore.update(appContext,(MultifyEventStore.find(appContext,event.id)?:event).copy(processedAt=decisionDone,decisionCompletedAt=decisionDone,decisionTier=d.tier.name,decisionDirection=d.direction?.name.orEmpty(),decisionScore=d.score,decisionPrice=d.price,decisionStrategy=d.strategyTag,decisionReason=d.reason))
         if(d.tier==MultifyDecisionTier.LIVE)openMultifyShadowTrade(event.id,d)
         AppNotifier.notifyMultifyDecision(appContext,d)
         DiagnosticLog.log(appContext,"MULTIFY-DECISION","${event.symbol} • ${event.eventType} → ${d.tier} ${d.direction?:"NONE"} • ${"%.1f".format(d.score)} • ${d.strategyTag} • notification→decision=${System.currentTimeMillis()-event.capturedAt}ms • ${d.reason}")
@@ -1824,7 +1849,9 @@ class GlobalEdgeAITraderRepository(context:Context){
     suspend fun exitAllMultifyPositions():Int=multifyMutex.withLock{
         if(!ensureAutomationAuthentication())return@withLock 0
         val token=accessToken();val all=multifyTrading.loadTrades(2500)
-        val managedSymbols=all.filter{it.liveEntryReference.isNotBlank()}.map{it.symbol}.toSet()
+        val fromTrades=all.filter{it.liveEntryReference.isNotBlank()}.map{it.symbol}
+        val fromBroker=prefs.loadBrokerOrders(500).filter{it.product=="MIS"&&it.referenceId.firstOrNull() in setOf('M','X','F','P')}.map{it.symbol}
+        val managedSymbols=(fromTrades+fromBroker).filter{it.isNotBlank()}.toSet()
         if(managedSymbols.isEmpty())return@withLock 0
         val positions=runCatching{groww.getPositions(token,"CASH")}.getOrDefault(emptyList()).filter{it.product=="MIS"&&it.quantity!=0&&it.tradingSymbol in managedSymbols}
         var closed=0
@@ -1833,7 +1860,7 @@ class GlobalEdgeAITraderRepository(context:Context){
             val side=if(pos.quantity>0)"SELL" else "BUY"
             val signal=runCatching{groww.getQuote(token,pos.tradingSymbol,fresh=true).lastPrice}.getOrDefault(row?.lastPrice?:pos.netPrice)
             val sub=try{
-                placeMultifyLiveOrder(pos.tradingSymbol,side,abs(pos.quantity),signal,"USER_EXIT_ALL",isExit=true,protectionId=row?.liveProtectionId.orEmpty())
+                placeMultifyLiveOrder(pos.tradingSymbol,side,abs(pos.quantity),signal,"USER_EXIT_ALL",isExit=true,protectionId=row?.liveProtectionId.orEmpty(),sourceEventId=row?.sourceEventId.orEmpty())
             }catch(t:Throwable){
                 DiagnosticLog.log(appContext,"MULTIFY-LIVE","EXIT ALL broker close failed • ${pos.tradingSymbol}",t)
                 continue
@@ -1853,12 +1880,13 @@ class GlobalEdgeAITraderRepository(context:Context){
     private suspend fun counterfactualMultifyReplay(rows:List<MultifyShadowTrade>):String{
         if(rows.isEmpty()||!ensureAutomationAuthentication())return ""
         val token=accessToken()
-        data class Rule(val name:String,val stopPct:Double,val targetPct:Double,val trailTrigger:Double,val trailGiveback:Double)
+        data class Rule(val name:String,val stopPct:Double,val targetPct:Double,val trailTrigger:Double,val trailGiveback:Double,val entryDelayMinutes:Int=0,val requireConfirm:Boolean=false)
         val rules=listOf(
             Rule("BASE",0.70,1.60,0.75,0.38),
             Rule("FAST_CAPTURE",0.50,0.90,0.55,0.28),
-            Rule("BALANCED",0.60,1.20,0.70,0.32),
-            Rule("RUNNER",0.90,2.00,1.00,0.42)
+            Rule("CONFIRM_1M",0.60,1.20,0.70,0.32,entryDelayMinutes=1,requireConfirm=true),
+            Rule("BALANCED_DELAY_1M",0.60,1.30,0.75,0.34,entryDelayMinutes=1),
+            Rule("RUNNER_DELAY_2M",0.90,2.00,1.00,0.42,entryDelayMinutes=2,requireConfirm=true)
         )
         val totals=linkedMapOf<String,Double>().apply{rules.forEach{put(it.name,0.0)}}
         var tested=0
@@ -1870,23 +1898,28 @@ class GlobalEdgeAITraderRepository(context:Context){
             if(bars.isEmpty())continue
             tested++
             for(rule in rules){
-                var peak=0.0;var exit=row.entryPrice;var closed=false
-                for(b in bars){
-                    val favorable=if(row.side==MultifyShadowSide.LONG)(b.high/row.entryPrice-1.0)*100.0 else (row.entryPrice/b.low-1.0)*100.0
-                    val adverse=if(row.side==MultifyShadowSide.LONG)(b.low/row.entryPrice-1.0)*100.0 else (row.entryPrice/b.high-1.0)*100.0
+                val eligibleBars=bars.filter{it.epochSeconds*1000L>=row.openedAt+rule.entryDelayMinutes*60_000L}
+                val first=eligibleBars.firstOrNull()?:continue
+                val replayEntry=first.open.takeIf{it>0.0}?:first.close
+                val confirms=!rule.requireConfirm || if(row.side==MultifyShadowSide.LONG)first.close>=first.open else first.close<=first.open
+                if(!confirms){totals[rule.name]=(totals[rule.name]?:0.0);continue}
+                var peak=0.0;var exit=replayEntry;var closed=false
+                for(b in eligibleBars){
+                    val favorable=if(row.side==MultifyShadowSide.LONG)(b.high/replayEntry-1.0)*100.0 else (replayEntry/b.low-1.0)*100.0
+                    val adverse=if(row.side==MultifyShadowSide.LONG)(b.low/replayEntry-1.0)*100.0 else (replayEntry/b.high-1.0)*100.0
                     // Conservative intrabar ordering: if both stop and target are touched, assume stop first.
-                    if(adverse<=-rule.stopPct){exit=if(row.side==MultifyShadowSide.LONG)row.entryPrice*(1-rule.stopPct/100.0) else row.entryPrice*(1+rule.stopPct/100.0);closed=true;break}
+                    if(adverse<=-rule.stopPct){exit=if(row.side==MultifyShadowSide.LONG)replayEntry*(1-rule.stopPct/100.0) else replayEntry*(1+rule.stopPct/100.0);closed=true;break}
                     if(peak>=rule.trailTrigger && peak-favorable>=rule.trailGiveback){
                         val locked=(peak-rule.trailGiveback).coerceAtLeast(0.0)
-                        exit=if(row.side==MultifyShadowSide.LONG)row.entryPrice*(1+locked/100.0) else row.entryPrice*(1-locked/100.0);closed=true;break
+                        exit=if(row.side==MultifyShadowSide.LONG)replayEntry*(1+locked/100.0) else replayEntry*(1-locked/100.0);closed=true;break
                     }
                     peak=maxOf(peak,favorable)
-                    if(favorable>=rule.targetPct){exit=if(row.side==MultifyShadowSide.LONG)row.entryPrice*(1+rule.targetPct/100.0) else row.entryPrice*(1-rule.targetPct/100.0);closed=true;break}
+                    if(favorable>=rule.targetPct){exit=if(row.side==MultifyShadowSide.LONG)replayEntry*(1+rule.targetPct/100.0) else replayEntry*(1-rule.targetPct/100.0);closed=true;break}
                     exit=b.close
                 }
-                if(!closed&&exit<=0.0)exit=row.entryPrice
-                val gross=if(row.side==MultifyShadowSide.LONG)(exit-row.entryPrice)*row.quantity else (row.entryPrice-exit)*row.quantity
-                val costs=(row.entryPrice*row.quantity+exit*row.quantity)*MULTIFY_ESTIMATED_COST_RATE_PER_LEG
+                if(!closed&&exit<=0.0)exit=replayEntry
+                val gross=if(row.side==MultifyShadowSide.LONG)(exit-replayEntry)*row.quantity else (replayEntry-exit)*row.quantity
+                val costs=(replayEntry*row.quantity+exit*row.quantity)*MULTIFY_ESTIMATED_COST_RATE_PER_LEG
                 totals[rule.name]=(totals[rule.name]?:0.0)+(gross-costs)
             }
         }

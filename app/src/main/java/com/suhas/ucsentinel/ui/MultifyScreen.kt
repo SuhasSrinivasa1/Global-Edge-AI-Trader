@@ -72,8 +72,14 @@ fun MultifyCompactScreen(state:UiState,vm:MainViewModel,padding:PaddingValues){
                         Switch(checked=state.settings.multifyLiveTradingEnabled,onCheckedChange=vm::setMultifyLiveTrading)
                     }
                     Text("LIVE resets OFF on the next IST date. The ₹2,00,000 Multify capital ceiling and the same Shadow decision/quantity are used for real orders. Existing live positions remain managed even if you switch OFF new entries.",style=MaterialTheme.typography.labelSmall,color=if(state.settings.multifyLiveTradingEnabled)MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
-                    OutlinedButton(onClick=vm::exitAllMultify,enabled=!state.busy&&state.authenticated&&open.isNotEmpty(),modifier=Modifier.fillMaxWidth()){
-                        Text("STOP / EXIT ALL MULTIFY POSITIONS")
+                    Text("Detected package: ${state.multifyCandidatePackage.ifBlank{"none yet"}}",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Trusted for LIVE: ${state.multifyTrustedPackage.ifBlank{"NOT SET — shadow/research only"}}",style=MaterialTheme.typography.labelSmall,color=if(state.multifyTrustedPackage.isBlank())MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        OutlinedButton(onClick=vm::trustDetectedMultifyPackage,enabled=!state.busy&&state.multifyCandidatePackage.isNotBlank()&&state.multifyCandidatePackage!=state.multifyTrustedPackage,modifier=Modifier.weight(1f)){Text("Trust detected app")}
+                        OutlinedButton(onClick=vm::clearTrustedMultifyPackage,enabled=!state.busy&&state.multifyTrustedPackage.isNotBlank(),modifier=Modifier.weight(1f)){Text("Clear trust")}
+                    }
+                    OutlinedButton(onClick=vm::exitAllMultify,enabled=!state.busy&&state.authenticated,modifier=Modifier.fillMaxWidth()){
+                        Text("STOP / FLATTEN LIVE MULTIFY POSITIONS")
                     }
                 }
             }
@@ -180,6 +186,13 @@ fun MultifyCompactScreen(state:UiState,vm:MainViewModel,padding:PaddingValues){
                             Text(e.eventType.name.replace('_',' '),color=if(e.eventType in setOf(MultifyEventType.ENTRY_SHORT,MultifyEventType.EXIT))MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,fontWeight=FontWeight.SemiBold)
                         }
                         Text(formatIstTimestamp(e.capturedAt)+(if(e.signalPrice>0)" • signal ₹${"%.2f".format(e.signalPrice)}" else "")+" • ${e.instrumentClass}",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("source ${e.packageName} • ${if(e.packageName==state.multifyTrustedPackage&&state.multifyTrustedPackage.isNotBlank())"TRUSTED FOR LIVE" else "RESEARCH ONLY"}",style=MaterialTheme.typography.labelSmall,color=if(e.packageName==state.multifyTrustedPackage&&state.multifyTrustedPackage.isNotBlank())MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        if(e.decisionCompletedAt>0L){
+                            val notificationToDecision=(e.decisionCompletedAt-e.capturedAt).coerceAtLeast(0L)
+                            val quoteLatency=if(e.quoteReceivedAt>0L)(e.quoteReceivedAt-e.capturedAt).coerceAtLeast(0L) else -1L
+                            val brokerLatency=if(e.brokerAcknowledgedAt>0L&&e.orderSubmittedAt>0L)(e.brokerAcknowledgedAt-e.orderSubmittedAt).coerceAtLeast(0L) else -1L
+                            Text("latency decision ${notificationToDecision}ms"+(if(quoteLatency>=0)" • quote ${quoteLatency}ms" else "")+(if(brokerLatency>=0)" • broker ack ${brokerLatency}ms" else ""),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         if(e.decisionTier.isNotBlank())Text("Global Edge: ${e.decisionTier} ${e.decisionDirection} • score ${String.format(Locale.US,"%.1f",e.decisionScore)} • ${e.decisionStrategy}",style=MaterialTheme.typography.bodySmall)
                         Text((e.title+" "+e.text).trim().take(220),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         if(e.evaluation=="PENDING"){

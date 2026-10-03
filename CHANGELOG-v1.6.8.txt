@@ -1,0 +1,9 @@
+Global Edge AI Trader v1.6.8 — Multify Trust, Learning & Observability Hardening
+
+- Multify notification packages are no longer auto-trusted for live execution. Candidate packages may be captured for research, but REAL ORDERS require an explicit in-app trust action that pins the exact Android package name.
+- REAL ORDERS cannot be armed until an exact Multify source package has been trusted; clearing trust automatically disarms live entries.
+- Added end-to-end Multify latency timestamps: listener receive, parse, fresh quote, decision completion, order submission, broker acknowledgement, first fill and full fill.
+- Emergency Multify flatten now derives managed symbols from both the shadow/live ledger and persisted Multify broker-order references; the UI no longer requires an open Shadow row to request flattening.
+- Stock-specific Champion ranking now uses Beta(2,2) Bayesian shrinkage plus a 20-session recency-weighted P&L tie-breaker while retaining the five-sample minimum and context compatibility checks.
+- Counterfactual nightly replay now tests delayed-entry/confirmation challengers in addition to stop, target and trailing variants, using point-in-time 1-minute candles with conservative intrabar stop-first ordering.
+- Preserves v1.6.7 Groww position truth, partial-fill cancellation, margin preflight, fresh <=15-second quote gate, spread/chase limits, actual-P&L profit/loss locks, broker OCO protection, risk-reducing exits and foreground-service reliability.

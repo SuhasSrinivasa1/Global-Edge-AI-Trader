@@ -49,7 +49,9 @@ data class MultifyStrategyStat(
     val losses:Int,
     val winRatePct:Double,
     val netPnl:Double,
-    val avgReturnPct:Double
+    val avgReturnPct:Double,
+    val bayesianWinRatePct:Double=0.0,
+    val recencyWeightedNet:Double=0.0
 )
 
 data class MultifyStockProfile(

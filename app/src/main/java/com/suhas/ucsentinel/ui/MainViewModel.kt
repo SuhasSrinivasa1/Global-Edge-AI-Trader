@@ -31,6 +31,7 @@ data class UiState(
     val evidenceFabric:EvidenceFabricSummary?=null,
     val growwApiHealth:GrowwApiHealthSnapshot=GrowwApiHealthSnapshot(),
     val multifyEvents:List<MultifyEvent> = emptyList(),val multifyListenerEnabled:Boolean=false,
+    val multifyCandidatePackage:String="",val multifyTrustedPackage:String="",
     val multifyDashboard:MultifyDashboard=MultifyDashboard(),val multifyShadowTrades:List<MultifyShadowTrade> = emptyList(),
     val multifyDecisions:List<MultifyDecision> = emptyList(),val multifyProfiles:List<MultifyStockProfile> = emptyList()
 )
@@ -155,7 +156,7 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
             strategyTournamentSummary=repo.strategyTournamentSummary(),lastStrategyScanAt=repo.lastStrategyScanAt(),lastStrategyAttemptAt=repo.lastStrategyAttemptAt(),lastStrategyErrorAt=repo.lastStrategyErrorAt(),lastStrategyError=repo.lastStrategyError(),lastStrategyCatalogRefreshAt=repo.lastStrategyCatalogRefreshAt(),strategyCatalogVersion=repo.strategyCatalogVersion(),
             strategyLive=repo.strategyLiveRecommendations(),strategyClosed=repo.strategyClosedRecommendations(),globalClosed=repo.globalLeadClosedRecommendations(),tradeCalls=repo.tradeCalls(),tradeAutopsies=repo.tradeAutopsies(),
             challengerShadows=repo.challengerShadows(),brokerOrders=repo.brokerOrders(),decisionSnapshots=repo.decisionSnapshots(),pointInTimeEvidence=repo.pointInTimeEvidence(),evidenceFabric=repo.evidenceFabricSummary(),growwApiHealth=repo.growwApiHealth(),
-            multifyEvents=repo.multifyEvents(),multifyListenerEnabled=repo.multifyListenerEnabled(),multifyDashboard=repo.multifyDashboard(),multifyShadowTrades=repo.multifyShadowTrades(),
+            multifyEvents=repo.multifyEvents(),multifyListenerEnabled=repo.multifyListenerEnabled(),multifyCandidatePackage=repo.multifyCandidatePackage(),multifyTrustedPackage=repo.multifyTrustedPackage(),multifyDashboard=repo.multifyDashboard(),multifyShadowTrades=repo.multifyShadowTrades(),
             multifyDecisions=repo.multifyDecisions(),multifyProfiles=repo.multifyProfiles())
     }
 
@@ -169,7 +170,7 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
             strategyTournamentSummary=repo.strategyTournamentSummary(),lastStrategyScanAt=repo.lastStrategyScanAt(),lastStrategyAttemptAt=repo.lastStrategyAttemptAt(),lastStrategyErrorAt=repo.lastStrategyErrorAt(),lastStrategyError=repo.lastStrategyError(),lastStrategyCatalogRefreshAt=repo.lastStrategyCatalogRefreshAt(),strategyCatalogVersion=repo.strategyCatalogVersion(),
             strategyLive=repo.strategyLiveRecommendations(),strategyClosed=repo.strategyClosedRecommendations(),globalClosed=repo.globalLeadClosedRecommendations(),tradeCalls=repo.tradeCalls(),tradeAutopsies=repo.tradeAutopsies(),
             challengerShadows=repo.challengerShadows(),brokerOrders=repo.brokerOrders(),decisionSnapshots=repo.decisionSnapshots(),pointInTimeEvidence=repo.pointInTimeEvidence(),evidenceFabric=repo.evidenceFabricSummary(),growwApiHealth=repo.growwApiHealth(),
-            multifyEvents=repo.multifyEvents(),multifyListenerEnabled=repo.multifyListenerEnabled(),multifyDashboard=repo.multifyDashboard(),multifyShadowTrades=repo.multifyShadowTrades(),
+            multifyEvents=repo.multifyEvents(),multifyListenerEnabled=repo.multifyListenerEnabled(),multifyCandidatePackage=repo.multifyCandidatePackage(),multifyTrustedPackage=repo.multifyTrustedPackage(),multifyDashboard=repo.multifyDashboard(),multifyShadowTrades=repo.multifyShadowTrades(),
             multifyDecisions=repo.multifyDecisions(),multifyProfiles=repo.multifyProfiles())
     }
 
@@ -312,10 +313,22 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
         }.onFailure{t->_state.value=_state.value.copy(busy=false,status="Multify replay failed",error=t.message)}
     }
     fun setMultifyLiveTrading(enabled:Boolean){
+        if(enabled&&repo.multifyTrustedPackage().isBlank()){
+            _state.value=_state.value.copy(status="REAL ORDERS remain OFF",error="Trust the exact detected Multify Android package before arming live execution.")
+            reliabilityRefresh();return
+        }
         val next=repo.settings().copy(multifyLiveTradingEnabled=enabled)
         repo.saveSettings(next)
         _state.value=_state.value.copy(settings=repo.settings(),status=if(enabled)"Multify REAL ORDERS armed for today" else "Multify new real orders disabled; shadow continues",error=null)
         reliabilityRefresh(error=null)
+    }
+    fun trustDetectedMultifyPackage(){
+        val ok=repo.trustMultifyCandidatePackage()
+        reliabilityRefresh(status=if(ok)"Exact Multify package trusted for LIVE execution" else "No valid Multify package has been detected yet",error=if(ok)null else "Wait for a Multify notification, then review and trust its exact package.")
+    }
+    fun clearTrustedMultifyPackage(){
+        repo.clearMultifyTrustedPackage();repo.saveSettings(repo.settings().copy(multifyLiveTradingEnabled=false))
+        reliabilityRefresh(status="Multify LIVE source trust cleared; REAL ORDERS disarmed",error=null)
     }
     fun exitAllMultify()=viewModelScope.launch{
         _state.value=_state.value.copy(busy=true,status="Closing all Multify positions…",error=null)

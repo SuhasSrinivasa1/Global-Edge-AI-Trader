@@ -47,22 +47,46 @@ data class MultifyEvent(
     val maePct:Double=0.0,
     val postExitFall5mPct:Double=0.0,
     val postExitFall15mPct:Double=0.0,
-    val evaluation:String="PENDING"
+    val evaluation:String="PENDING",
+    val listenerReceivedAt:Long=0L,
+    val parsedAt:Long=0L,
+    val quoteReceivedAt:Long=0L,
+    val decisionCompletedAt:Long=0L,
+    val orderSubmittedAt:Long=0L,
+    val brokerAcknowledgedAt:Long=0L,
+    val firstFillAt:Long=0L,
+    val fullFillAt:Long=0L
 )
+
+object MultifyTrustPolicy {
+    fun isResearchCandidatePackage(packageName:String):Boolean =
+        packageName.isNotBlank() && packageName.lowercase(Locale.ROOT).contains("multify")
+    fun canUseForLive(trustedPackage:String,packageName:String):Boolean =
+        trustedPackage.isNotBlank() && trustedPackage==packageName
+}
 
 object MultifyEventStore {
     private const val PREFS="global_edge_multify_events"
     private const val KEY="events_json"
-    private const val TRUSTED_PACKAGE_KEY="trusted_multify_package"
+    private const val TRUSTED_PACKAGE_KEY="trusted_multify_package_v168"
+    private const val CANDIDATE_PACKAGE_KEY="candidate_multify_package"
     private const val MAX_EVENTS=1000
 
     @Synchronized fun trustedPackage(context:Context):String=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE).getString(TRUSTED_PACKAGE_KEY,"").orEmpty()
-    @Synchronized fun trustPackageIfUnset(context:Context,packageName:String):Boolean{
-        if(!packageName.lowercase(Locale.ROOT).contains("multify"))return false
-        val prefs=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);val current=prefs.getString(TRUSTED_PACKAGE_KEY,"").orEmpty()
-        if(current.isBlank()){prefs.edit().putString(TRUSTED_PACKAGE_KEY,packageName).apply();return true}
-        return current==packageName
+    @Synchronized fun candidatePackage(context:Context):String=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE).getString(CANDIDATE_PACKAGE_KEY,"").orEmpty()
+    @Synchronized fun observeCandidatePackage(context:Context,packageName:String):Boolean{
+        if(!MultifyTrustPolicy.isResearchCandidatePackage(packageName))return false
+        val prefs=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
+        if(prefs.getString(CANDIDATE_PACKAGE_KEY,"").orEmpty()!=packageName)prefs.edit().putString(CANDIDATE_PACKAGE_KEY,packageName).apply()
+        return true
     }
+    @Synchronized fun trustCandidatePackage(context:Context):Boolean{
+        val prefs=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);val candidate=prefs.getString(CANDIDATE_PACKAGE_KEY,"").orEmpty()
+        if(!MultifyTrustPolicy.isResearchCandidatePackage(candidate))return false
+        prefs.edit().putString(TRUSTED_PACKAGE_KEY,candidate).apply();return true
+    }
+    @Synchronized fun clearTrustedPackage(context:Context){context.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().remove(TRUSTED_PACKAGE_KEY).apply()}
+    @Synchronized fun sourceTrustedForLive(context:Context,packageName:String):Boolean=MultifyTrustPolicy.canUseForLive(trustedPackage(context),packageName)
 
     fun listenerEnabled(context:Context):Boolean {
         val enabled=Settings.Secure.getString(context.contentResolver,"enabled_notification_listeners").orEmpty()
@@ -98,7 +122,9 @@ object MultifyEventStore {
                         instrumentClass=runCatching{MultifyInstrumentClass.valueOf(o.optString("instrumentClass"))}.getOrDefault(MultifyInstrumentClass.UNKNOWN),
                         processedAt=o.optLong("processedAt"),decisionTier=o.optString("decisionTier"),decisionDirection=o.optString("decisionDirection"),decisionScore=o.optDouble("decisionScore"),decisionPrice=o.optDouble("decisionPrice"),decisionStrategy=o.optString("decisionStrategy"),decisionReason=o.optString("decisionReason"),
                         evaluatedAt=o.optLong("evaluatedAt"),return1mPct=o.optDouble("return1mPct"),return3mPct=o.optDouble("return3mPct"),return5mPct=o.optDouble("return5mPct"),return15mPct=o.optDouble("return15mPct",0.0),mfePct=o.optDouble("mfePct",0.0),maePct=o.optDouble("maePct",0.0),
-                        postExitFall5mPct=o.optDouble("postExitFall5mPct"),postExitFall15mPct=o.optDouble("postExitFall15mPct"),evaluation=o.optString("evaluation","PENDING")
+                        postExitFall5mPct=o.optDouble("postExitFall5mPct"),postExitFall15mPct=o.optDouble("postExitFall15mPct"),evaluation=o.optString("evaluation","PENDING"),
+                        listenerReceivedAt=o.optLong("listenerReceivedAt"),parsedAt=o.optLong("parsedAt"),quoteReceivedAt=o.optLong("quoteReceivedAt"),decisionCompletedAt=o.optLong("decisionCompletedAt"),
+                        orderSubmittedAt=o.optLong("orderSubmittedAt"),brokerAcknowledgedAt=o.optLong("brokerAcknowledgedAt"),firstFillAt=o.optLong("firstFillAt"),fullFillAt=o.optLong("fullFillAt")
                     ))
                 }
             }
@@ -111,9 +137,23 @@ object MultifyEventStore {
                 put("id",e.id);put("capturedAt",e.capturedAt);put("packageName",e.packageName);put("title",e.title);put("text",e.text);put("direction",e.direction);put("symbol",e.symbol);put("signalPrice",e.signalPrice)
                 put("eventType",e.eventType.name);put("instrumentClass",e.instrumentClass.name);put("processedAt",e.processedAt);put("decisionTier",e.decisionTier);put("decisionDirection",e.decisionDirection);put("decisionScore",e.decisionScore);put("decisionPrice",e.decisionPrice);put("decisionStrategy",e.decisionStrategy);put("decisionReason",e.decisionReason)
                 put("evaluatedAt",e.evaluatedAt);put("return1mPct",e.return1mPct);put("return3mPct",e.return3mPct);put("return5mPct",e.return5mPct);put("return15mPct",e.return15mPct);put("mfePct",e.mfePct);put("maePct",e.maePct);put("postExitFall5mPct",e.postExitFall5mPct);put("postExitFall15mPct",e.postExitFall15mPct);put("evaluation",e.evaluation)
+                put("listenerReceivedAt",e.listenerReceivedAt);put("parsedAt",e.parsedAt);put("quoteReceivedAt",e.quoteReceivedAt);put("decisionCompletedAt",e.decisionCompletedAt)
+                put("orderSubmittedAt",e.orderSubmittedAt);put("brokerAcknowledgedAt",e.brokerAcknowledgedAt);put("firstFillAt",e.firstFillAt);put("fullFillAt",e.fullFillAt)
             })
         }
         context.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putString(KEY,a.toString()).apply()
+    }
+
+
+    @Synchronized fun markLatency(
+        context:Context,id:String,listenerReceivedAt:Long?=null,parsedAt:Long?=null,quoteReceivedAt:Long?=null,decisionCompletedAt:Long?=null,
+        orderSubmittedAt:Long?=null,brokerAcknowledgedAt:Long?=null,firstFillAt:Long?=null,fullFillAt:Long?=null
+    ){
+        val e=find(context,id)?:return
+        update(context,e.copy(
+            listenerReceivedAt=listenerReceivedAt?:e.listenerReceivedAt,parsedAt=parsedAt?:e.parsedAt,quoteReceivedAt=quoteReceivedAt?:e.quoteReceivedAt,decisionCompletedAt=decisionCompletedAt?:e.decisionCompletedAt,
+            orderSubmittedAt=orderSubmittedAt?:e.orderSubmittedAt,brokerAcknowledgedAt=brokerAcknowledgedAt?:e.brokerAcknowledgedAt,firstFillAt=firstFillAt?:e.firstFillAt,fullFillAt=fullFillAt?:e.fullFillAt
+        ))
     }
 
     fun idFor(packageName:String,postedAt:Long,title:String,text:String):String{
@@ -135,6 +175,7 @@ class MultifyNotificationService:NotificationListenerService(){
     override fun onDestroy(){immediateScope.cancel();super.onDestroy()}
 
     override fun onNotificationPosted(sbn:StatusBarNotification){
+        val listenerReceivedAt=System.currentTimeMillis()
         val n=sbn.notification?:return
         val title=n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty().trim()
         val text=listOf(
@@ -144,10 +185,10 @@ class MultifyNotificationService:NotificationListenerService(){
         ).firstOrNull{it.isNotBlank()}.orEmpty().trim()
         val pkg=sbn.packageName.orEmpty()
         val combined="$title $text"
-        // Trust the exact Multify package after the first package-namespace match.
-        // Text that merely says "Multify" is never accepted as a trading trigger.
-        if(!MultifyEventStore.trustPackageIfUnset(applicationContext,pkg))return
-        if(pkg!=MultifyEventStore.trustedPackage(applicationContext))return
+        // v1.6.8: package-name matches may be captured for research, but they are never
+        // automatically trusted for live execution. LIVE requires an explicit in-app trust action
+        // that pins the exact detected Android package name.
+        if(!MultifyEventStore.observeCandidatePackage(applicationContext,pkg))return
         if(combined.isBlank())return
 
         val upper=combined.uppercase(Locale.ROOT)
@@ -165,7 +206,8 @@ class MultifyNotificationService:NotificationListenerService(){
             .find(combined)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?:0.0
         val event=MultifyEvent(
             id=MultifyEventStore.idFor(pkg,sbn.postTime,title,text),capturedAt=sbn.postTime,packageName=pkg,title=title.take(160),text=text.take(900),
-            direction=if(eventType==MultifyEventType.EXIT)"EXIT" else direction,symbol=symbol,signalPrice=price,eventType=eventType,instrumentClass=instrumentClass
+            direction=if(eventType==MultifyEventType.EXIT)"EXIT" else direction,symbol=symbol,signalPrice=price,eventType=eventType,instrumentClass=instrumentClass,
+            listenerReceivedAt=listenerReceivedAt,parsedAt=System.currentTimeMillis()
         )
         if(MultifyEventStore.capture(applicationContext,event)){
             DiagnosticLog.log(applicationContext,"MULTIFY","captured ${event.eventType} ${event.symbol.ifBlank{"unparsed"}} • class=${event.instrumentClass} • package=$pkg")
