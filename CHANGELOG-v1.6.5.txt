@@ -1,0 +1,12 @@
+Global Edge AI Trader v1.6.5 — Multify Live Execution
+
+- Preserves the v1.6.4 Multify Intraday Lab, shadow P&L, ₹2,00,000 capital ceiling, ₹5,000 daily target, stock-specific strategy memory, exit-decay learning, wave monitoring, forensic replay and centralized log export.
+- Adds a Multify REAL ORDERS toggle. It is OFF by default and automatically disarms on the next IST calendar day.
+- Shadow and LIVE share the same decision, strategy, quantity and capital-allocation path. Only LIVE-tier Multify decisions may submit automatic Groww orders; DEVELOPING/WATCH remain research-only.
+- Automatic Multify orders are NSE CASH intraday MIS market orders using the existing authenticated Groww access token and static-IP guard.
+- Adds duplicate/uncertain-order protection and broker reconciliation before continuing after ambiguous submissions.
+- Existing LIVE Multify positions remain managed even if the toggle is switched OFF; OFF blocks new automated entries.
+- Adds STOP / EXIT ALL MULTIFY POSITIONS control.
+- Preserves the hard ₹2,00,000 Multify exposure ceiling and adds a -₹5,000 shadow-day circuit breaker for new automatic entries.
+- Stores live entry/exit references alongside shadow trades so exported logs can compare Shadow vs LIVE execution.
+- Centralized Settings > Export all logs remains the single diagnostic bundle export for daily/weekly/monthly review.

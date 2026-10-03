@@ -1,0 +1,7 @@
+Global Edge AI Trader v1.5.9 — ledger integrity hotfix
+
+- Blocks UC and Pressure LIVE call publication outside the NSE 09:15–15:30 IST regular session.
+- Adds INVALID trade-call outcome for expired calls when historical replay data is unavailable; INVALID calls are excluded from calibration, adaptive thresholds, autopsy learning, and Global learning.
+- Prevents repeated Global LIVE calls for the same symbol + direction within the same trading session.
+- One-time v1.5.9 ledger migration invalidates legacy post-close UC/Pressure LIVE calls and same-session duplicate Global LIVE calls, then rebuilds Global learning from valid WIN/LOSS calls only.
+- Preserves manual-order-only behavior and existing v1.5.8 full-NSE/strategy logic.

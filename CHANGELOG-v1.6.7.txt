@@ -1,0 +1,9 @@
+Global Edge AI Trader v1.6.7 — Reliability & Execution Hardening Hotfix
+
+- Groww MIS entry margin preflight using broker margin APIs.
+- Partial-fill remainder cancellation before broker-side protection is armed.
+- Risk-reducing exits no longer depend on quote quality or external static-IP lookup.
+- OCO cancellation failure cannot block an emergency/risk-reducing exit.
+- Multify entry execution tightened to <=0.35% spread and <=0.50% chase from decision price.
+- Foreground market service starts only from a visible Activity; boot/process startup relies on WorkManager until the app becomes visible.
+- Android backups remain disabled; v1.6.6 broker-position truth, compact order references, OCO protection, fresh quotes, stock memory, 1-minute/anchored VWAP and counterfactual replay are preserved.

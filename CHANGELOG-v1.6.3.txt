@@ -1,0 +1,12 @@
+Global Edge AI Trader v1.6.3 — Signal Visibility + Throughput Recovery
+
+- Preserves all v1.6.2 Multify integration, nightly deep learning, off-hours learning, ledger integrity and manual-order-only safeguards.
+- Loosens healthy Groww live-data pacing to 285/min while keeping automatic 429 cooldown at 220/min.
+- Keeps UC/Pressure, Strategy and Global Groww-heavy foreground jobs serialized; scan timeout raised to 5 minutes.
+- UC fast lane now publishes three visibility tiers: LIVE, DEVELOPING and WATCH. Only UC_LIVE is written to the call ledger or notification path.
+- UC funnel shows full-universe, prelim, fast-lane, scored, score-qualified, signal-ready, execution-ready and tier counts.
+- Strategy discovery accepts usable one-sided/discovery quotes for research visibility; strict executable-book checks remain mandatory for LIVE publication.
+- Strategy UI separates DEVELOPING (68+) from WATCH (<68) rather than hiding near-threshold research.
+- Existing execution-cost/depth/slippage handbook failures remain visible as EXECUTION CAUTION rather than silently erasing research candidates.
+- Legacy Recall challenger, Pressure fast lane, Multify event replay and nightly learning from v1.6.2 remain intact.
+- Hard invalid/stale data, non-intraday short eligibility, macro hard waits, risk/reward and manual-order execution safety remain preserved.

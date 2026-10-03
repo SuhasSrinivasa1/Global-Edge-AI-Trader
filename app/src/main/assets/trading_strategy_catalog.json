@@ -1,0 +1,221 @@
+{
+  "version": "STRAT-2026.09-A",
+  "strategies": [
+    {
+      "id": "pd_fvg_sweep",
+      "name": "PD Array Sweep → Displacement → FVG Retest",
+      "kind": "PD_FVG_SWEEP",
+      "family": "Liquidity / FVG",
+      "description": "Higher-timeframe imbalance context, liquidity sweep, displacement and FVG confirmation. Uses the liquidity-sweep branch when SMT pair data is unavailable.",
+      "source": "r/Daytrading concept + internal rule encoding",
+      "priority": 100
+    },
+    {
+      "id": "orb_rvol",
+      "name": "Opening Range Breakout + RVOL",
+      "kind": "ORB_RVOL",
+      "family": "Breakout",
+      "description": "Break of the opening range with relative-volume confirmation.",
+      "source": "Classical opening-range breakout",
+      "priority": 96
+    },
+    {
+      "id": "vwap_reclaim",
+      "name": "VWAP Reclaim + Volume",
+      "kind": "VWAP_RECLAIM",
+      "family": "VWAP",
+      "description": "Price reclaims or loses session VWAP with volume confirmation.",
+      "source": "VWAP momentum",
+      "priority": 94
+    },
+    {
+      "id": "vwap_pullback",
+      "name": "VWAP Pullback Continuation",
+      "kind": "VWAP_PULLBACK",
+      "family": "VWAP",
+      "description": "Trend-aligned pullback that holds/rejects VWAP.",
+      "source": "VWAP trend continuation",
+      "priority": 92
+    },
+    {
+      "id": "boll_squeeze",
+      "name": "Bollinger Squeeze Expansion",
+      "kind": "BOLL_SQUEEZE",
+      "family": "Volatility",
+      "description": "Volatility compression followed by band expansion and volume confirmation.",
+      "source": "Bollinger Bands",
+      "priority": 91
+    },
+    {
+      "id": "donchian20",
+      "name": "20-Bar Donchian Breakout",
+      "kind": "DONCHIAN",
+      "family": "Breakout",
+      "description": "Break of the highest/lowest 20-bar channel with volume.",
+      "source": "Donchian breakout",
+      "priority": 90
+    },
+    {
+      "id": "gap_go",
+      "name": "Gap-and-Go + VWAP Hold",
+      "kind": "GAP_GO",
+      "family": "Gap",
+      "description": "Opening gap remains accepted above/below the open and VWAP.",
+      "source": "Gap continuation",
+      "priority": 89
+    },
+    {
+      "id": "ema9_21",
+      "name": "9/21 EMA Momentum Cross",
+      "kind": "EMA_CROSS",
+      "family": "Trend",
+      "description": "Fast/slow EMA crossover with volume confirmation.",
+      "source": "Moving-average momentum",
+      "priority": 88
+    },
+    {
+      "id": "trend_pullback",
+      "name": "20/50 EMA Trend Pullback",
+      "kind": "TREND_PULLBACK",
+      "family": "Trend",
+      "description": "Pullback to the fast trend EMA while the broader trend remains aligned.",
+      "source": "Trend pullback",
+      "priority": 87
+    },
+    {
+      "id": "macd_trend",
+      "name": "MACD Trend Continuation",
+      "kind": "MACD",
+      "family": "Momentum",
+      "description": "MACD proxy continuation when price confirms the prevailing trend.",
+      "source": "MACD",
+      "priority": 85
+    },
+    {
+      "id": "rsi2_trend",
+      "name": "RSI(2) Trend Pullback",
+      "kind": "RSI2_TREND",
+      "family": "Mean reversion",
+      "description": "Short-horizon RSI exhaustion inside a larger EMA trend.",
+      "source": "RSI mean reversion",
+      "priority": 84
+    },
+    {
+      "id": "rsi14_reversal",
+      "name": "RSI(14) Reversal + Candle",
+      "kind": "RSI14_REVERSAL",
+      "family": "Mean reversion",
+      "description": "Oversold/overbought reversal requiring price confirmation.",
+      "source": "RSI",
+      "priority": 83
+    },
+    {
+      "id": "stoch_reversal",
+      "name": "Stochastic Exhaustion Reversal",
+      "kind": "STOCH_REVERSAL",
+      "family": "Mean reversion",
+      "description": "Stochastic proxy exits an extreme with confirming candle direction.",
+      "source": "Stochastic oscillator",
+      "priority": 82
+    },
+    {
+      "id": "inside_bar",
+      "name": "Inside-Bar Expansion",
+      "kind": "INSIDE_BAR",
+      "family": "Candles",
+      "description": "Inside-bar compression followed by a volume-backed break.",
+      "source": "Candlestick / price action",
+      "priority": 81
+    },
+    {
+      "id": "engulfing",
+      "name": "Engulfing + Trend Context",
+      "kind": "ENGULFING",
+      "family": "Candles",
+      "description": "Bullish/bearish engulfing pattern near the trend mean.",
+      "source": "Candlestick analysis",
+      "priority": 80
+    },
+    {
+      "id": "nr7",
+      "name": "NR7 Compression Expansion",
+      "kind": "NR7_EXPANSION",
+      "family": "Volatility",
+      "description": "Narrow-range compression followed by range expansion.",
+      "source": "NR7 volatility setup",
+      "priority": 79
+    },
+    {
+      "id": "hammer",
+      "name": "Hammer / Shooting-Star Rejection",
+      "kind": "HAMMER",
+      "family": "Candles",
+      "description": "Long-wick rejection aligned with momentum exhaustion.",
+      "source": "Candlestick analysis",
+      "priority": 78
+    },
+    {
+      "id": "morning_evening_star",
+      "name": "Morning / Evening Star Reversal",
+      "kind": "MORNING_STAR",
+      "family": "Candles",
+      "description": "Three-candle reversal sequence.",
+      "source": "Candlestick analysis",
+      "priority": 77
+    },
+    {
+      "id": "three_soldiers",
+      "name": "Three-Candle Momentum Staircase",
+      "kind": "THREE_SOLDIERS",
+      "family": "Candles",
+      "description": "Three consecutive directional candles with continuation structure.",
+      "source": "Three white soldiers / black crows family",
+      "priority": 76
+    },
+    {
+      "id": "atr_breakout",
+      "name": "ATR Expansion Breakout",
+      "kind": "ATR_BREAKOUT",
+      "family": "Volatility",
+      "description": "Breakout with an unusually large ATR-normalized impulse.",
+      "source": "ATR breakout",
+      "priority": 75
+    },
+    {
+      "id": "support_resistance",
+      "name": "Support / Resistance Rejection",
+      "kind": "SUPPORT_RESISTANCE",
+      "family": "Price action",
+      "description": "Rejection from a recent 20-bar extreme with momentum context.",
+      "source": "Support/resistance",
+      "priority": 74
+    },
+    {
+      "id": "trend_strength",
+      "name": "Trend Strength Continuation",
+      "kind": "ADX_TREND",
+      "family": "Trend",
+      "description": "EMA separation proxy for trend strength plus directional continuation.",
+      "source": "Trend-strength family",
+      "priority": 73
+    },
+    {
+      "id": "volume_breakout",
+      "name": "Price Breakout + Volume Ignition",
+      "kind": "VOLUME_BREAKOUT",
+      "family": "Volume",
+      "description": "Local price breakout with at least 1.8x relative volume.",
+      "source": "Price-volume confirmation",
+      "priority": 93
+    },
+    {
+      "id": "volume_breakout_challenger",
+      "name": "High-Conviction Volume Breakout",
+      "kind": "VOLUME_BREAKOUT",
+      "family": "Volume",
+      "description": "A challenger variant of volume-backed price expansion.",
+      "source": "Price-volume confirmation",
+      "priority": 70
+    }
+  ]
+}

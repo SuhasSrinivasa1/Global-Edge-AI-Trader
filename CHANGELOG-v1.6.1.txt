@@ -1,0 +1,14 @@
+Global Edge AI Trader v1.6.1
+
+Incremental recall + scan-completion update built from v1.6.0.
+
+- Keeps full-NSE first-stage screening for UC, Pressure and Strategy.
+- Adds ranked UC fast lane (80 live / 120 next-session deep confirmations) so 5-minute passes finish instead of timing out.
+- Adds ranked Pressure fast lane (up to 80 deep confirmations) after full-NSE screening.
+- Reduces Strategy deep-history work to 220 deterministic queued symbols per pass; deferred symbols rotate into later passes.
+- Converts Handbook execution hard-gates into score-penalized EXECUTION CAUTION research visibility.
+- LIVE Strategy publication still requires strict executable-quote checks, intraday eligibility, macro hard-waits and governance.
+- UC screen automatically opens WATCH when no LIVE call exists but near-match research candidates are available.
+- Groww Live Data pacing raised to ~272/min healthy ceiling with adaptive 220/min cooldown for two minutes after an actual HTTP 429.
+- Off-hours autonomous learning preserved and strengthened: rejected shadows, challenger shadows, outcome learning and larger post-trade autopsy budget continue outside market hours.
+- Manual order only behavior remains unchanged.

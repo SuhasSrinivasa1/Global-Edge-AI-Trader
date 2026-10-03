@@ -1,0 +1,18 @@
+Global Edge AI Trader v1.6.2
+
+Incremental coordination + Multify research update built on v1.6.1.
+
+- Adds a proper branded adaptive launcher icon and round icon.
+- Adds Multify notification-listener lane with explicit Android notification-access setup.
+- Captures only notifications identified as Multify; parses BUY/SELL, NSE symbol, timestamp and signal price when present.
+- Adds Multify event replay: 15-minute return, MFE and MAE are evaluated from Groww historical candles and fed into learning logs.
+- Adds a dedicated Multify UI tab with listener health, captured events and replay status.
+- Preserves 15-minute autonomous learning and adds a 17:45 IST nightly deep-learning worker.
+- Nightly learning forces a full learning pass, resolves challenger shadows, replays more Multify events, refreshes UC next-session research and Global research.
+- Coordinates live engine start times so UC/Pressure has first claim on Groww live-data capacity, Strategy second and Global third instead of launching all heavy jobs into the same request window.
+- Adds session-aware Strategy prioritization for OPEN / MID / LATE trading regimes while retaining the broader active library.
+- Adds a non-executable LEGACY RECALL shadow lane for 60-67.9 score setups so higher-recall behaviour can be measured without becoming live calls.
+- Keeps LIVE Strategy threshold at 72 and preserves strict executable-quote checks before a LIVE/orderable card.
+- Keeps v1.6.1 UC/Pressure fast lanes, execution cautions, off-hours learning, v1.6.0 API-health monitoring and v1.5.9 ledger-integrity fixes.
+- Updates UI wording and system-status cards so API health, Multify listener, learning cadence and engine priorities are consistent.
+- Manual-order-only behaviour is preserved.

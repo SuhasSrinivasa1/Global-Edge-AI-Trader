@@ -1,0 +1,15 @@
+Global Edge AI Trader v1.6.4 — Multify Intraday Lab + Centralized Logs
+
+- Preserves v1.6.3 UC/Pressure/Strategy/Global signal visibility, serialized Groww-heavy engines, ledger integrity, 285/min healthy Groww live budget, 220/min 429 cooldown and manual-order execution safeguard.
+- Multify cash-equity notifications are classified as ENTRY LONG, ENTRY SHORT or EXIT; options/futures/index/commodity-like notifications are rejected from the Multify learning lane.
+- Every eligible Multify entry/exit is queued for immediate priority analysis with price, volume, VWAP, momentum, RSI, candle, breakout and stock-specific memory features.
+- Multify EXIT immediately closes a matching shadow long, measures the post-exit path and tests a fresh SHORT hypothesis without waiting for the normal 5-minute scanners.
+- Adds a one-minute Multify wave monitor for recently alerted stocks. Shadow LONG/SHORT waves use trailing-profit, hard-stop, time-decay and evidence-based reversal logic with cooldowns and a maximum six waves per symbol/day.
+- Adds a fixed ₹2,00,000 Multify shadow capital pool and explicit ₹5,000 net/day Phase-1 target. Shadow P&L includes estimated entry/exit transaction costs.
+- Adds stock-specific strategy memory. Closed shadow waves build per-symbol LONG and SHORT Champion statistics; a stored Champion is reused only when current market context remains compatible.
+- Multify path replay now measures 1/3/5/15-minute returns plus MFE/MAE. EXIT events separately learn 5m/15m post-exit fall magnitude.
+- Adds nightly Multify forensic learning. >=₹5,000 is TARGET EXCEEDED; ₹2,500–₹4,999 is optimization review; below ₹2,500 is forensic review. Replay results never overwrite actual shadow P&L.
+- Multify screen now shows Shadow P&L, ₹2 lakh exposure, ₹5k target progress, five-session average, EXIT→fall edge, open waves, stock-specific Champions, recent Global Edge decisions and detailed Multify events.
+- Adds high-priority notifications for new Multify LIVE/DEVELOPING analysis.
+- Adds one centralized Settings button: Export all logs. The ZIP contains runtime diagnostics, state report, learning report and the Multify lab report. Groww credentials/TOTP/access token are excluded.
+- Real Groww order automation is NOT enabled in this build. Existing explicit manual order confirmation remains the only real-order path; Shadow mode automatically evaluates the same Multify decisions for learning.

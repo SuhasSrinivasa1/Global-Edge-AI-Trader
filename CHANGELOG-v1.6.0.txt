@@ -1,0 +1,10 @@
+Global Edge AI Trader v1.6.0 — Groww API hygiene monitor
+
+- Adds an always-on local Groww API usage meter because Groww does not expose a remaining-request quota counter.
+- Tracks rolling Live Data usage per second and per minute, plus Authentication, Orders, Non-Trading, Historical calls and HTTP 429 rate-limit responses.
+- Adds an automatic Live Data reserve guard at 240 requests/minute, preserving 20% headroom below Groww's published 300/minute Live Data ceiling.
+- Keeps the existing 260 ms Live Data pacer and adds endpoint-appropriate pacing for Authentication, Orders and Non-Trading calls.
+- Correctly accounts order status/detail/trades as Non-Trading rather than Live Data for local budgeting.
+- Adds a Settings card showing API health, token/authentication status, rolling usage, headroom, 429 count and requests tracked since app start.
+- Includes the API-health snapshot in the End-of-Day diagnostic report.
+- Preserves v1.5.9 ledger integrity fixes, full-NSE strategy/UC logic, five-minute automation and manual-order-only behavior.

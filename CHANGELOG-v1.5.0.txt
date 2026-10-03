@@ -1,0 +1,16 @@
+Global Edge AI Trader v1.5.0
+- Exact NSE Capital Market 2026 regular-session calendar (NSE/CMTR/71775)
+- Prospective point-in-time evidence ledger; no historical back-fill
+- RBI / company event risk registry and hard WAIT gates
+- NIFTY 500 industry, peer breadth and relative-strength Evidence Fabric
+- Strict non-executable Challenger shadow lane
+- Scheduled-horizon historical shadow resolution
+- Challenger promotion from prospective shadow evidence only
+- Groww order/detail/trade-fill reconciliation
+- Deterministic pre-submit reference IDs and no automatic POST retry
+- Ambiguous order recovery by order reference ID
+- Permanent broker execution ledger / Portfolio screen
+- Decision Snapshot SHA-256 audit trail
+- Strategy Lab Shadow Run / Resolve controls
+- Existing handbook roles preserved: 100 strategies + 50 candles + 50 filters
+- Existing manual PLACE ORDER flow retained; hard risk/liquidity gates override score

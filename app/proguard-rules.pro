@@ -1,0 +1,2 @@
+-keep class com.suhas.ucsentinel.** { *; }
+-dontwarn org.conscrypt.**

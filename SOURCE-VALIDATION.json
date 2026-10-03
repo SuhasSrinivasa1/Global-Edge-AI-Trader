@@ -1,0 +1,12 @@
+{
+  "release": "1.4.4",
+  "versionCode": 144,
+  "features": [
+    "dynamic UC score range 66-88",
+    "dynamic pre-pressure score range 62-86",
+    "candidate-specific 1.5-4.5 percent spike target",
+    "dynamic 6-10x already-pressure cutoff",
+    "15-minute background refresh retained",
+    "version-isolated adaptive learning"
+  ]
+}

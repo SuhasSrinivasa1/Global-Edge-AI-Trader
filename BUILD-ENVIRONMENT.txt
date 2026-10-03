@@ -1,0 +1,8 @@
+UC Sentinel v1.0 build baseline
+JDK: 17
+Android Gradle Plugin: 8.10.1
+Gradle: 8.11.1
+compileSdk: 36
+targetSdk: 36
+minSdk: 28
+Build Tools: 35.0.0 or Android SDK default compatible build-tools

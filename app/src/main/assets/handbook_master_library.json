@@ -1,0 +1,820 @@
+{
+  "version": "HANDBOOK-2026-09-24",
+  "source": "Complete Trading System Master Playbook",
+  "strategies": [
+    {
+      "id": 1,
+      "name": "Value + Momentum + Quality Multi-Factor"
+    },
+    {
+      "id": 2,
+      "name": "Diversified Time-Series Momentum / Managed Futures"
+    },
+    {
+      "id": 3,
+      "name": "Cross-Sectional Momentum"
+    },
+    {
+      "id": 4,
+      "name": "Quality + Value"
+    },
+    {
+      "id": 5,
+      "name": "Risk-Parity Core + Trend Overlay"
+    },
+    {
+      "id": 6,
+      "name": "Carry + Trend"
+    },
+    {
+      "id": 7,
+      "name": "Low-Beta + Quality"
+    },
+    {
+      "id": 8,
+      "name": "Multi-Asset Value + Momentum"
+    },
+    {
+      "id": 9,
+      "name": "Gross-Profitability / Quality Premium"
+    },
+    {
+      "id": 10,
+      "name": "Betting Against Beta (BAB)"
+    },
+    {
+      "id": 11,
+      "name": "Post-Earnings-Announcement Drift (PEAD)"
+    },
+    {
+      "id": 12,
+      "name": "Earnings-Revisions Momentum"
+    },
+    {
+      "id": 13,
+      "name": "Dual Momentum"
+    },
+    {
+      "id": 14,
+      "name": "Crisis Trend / Defensive Managed Futures"
+    },
+    {
+      "id": 15,
+      "name": "Quality GARP"
+    },
+    {
+      "id": 16,
+      "name": "Short-Term Reversal with Liquidity Filter"
+    },
+    {
+      "id": 17,
+      "name": "Pairs Trading / Relative-Value Mean Reversion"
+    },
+    {
+      "id": 18,
+      "name": "Merger Arbitrage Basket"
+    },
+    {
+      "id": 19,
+      "name": "Cash-Secured Index PutWrite"
+    },
+    {
+      "id": 20,
+      "name": "Covered-Call / BuyWrite Overlay"
+    },
+    {
+      "id": 21,
+      "name": "12-Month Time-Series Momentum"
+    },
+    {
+      "id": 22,
+      "name": "6-Month Time-Series Momentum"
+    },
+    {
+      "id": 23,
+      "name": "Donchian Channel Breakout"
+    },
+    {
+      "id": 24,
+      "name": "Moving-Average Trend Filter"
+    },
+    {
+      "id": 25,
+      "name": "Volatility-Scaled Trend Following"
+    },
+    {
+      "id": 26,
+      "name": "Trend + Pullback Entry"
+    },
+    {
+      "id": 27,
+      "name": "Volatility-Contraction Breakout"
+    },
+    {
+      "id": 28,
+      "name": "52-Week-High Momentum"
+    },
+    {
+      "id": 29,
+      "name": "Residual Momentum"
+    },
+    {
+      "id": 30,
+      "name": "Industry Momentum"
+    },
+    {
+      "id": 31,
+      "name": "Sector Rotation by Relative Strength"
+    },
+    {
+      "id": 32,
+      "name": "Commodity Trend Basket"
+    },
+    {
+      "id": 33,
+      "name": "FX Trend Basket"
+    },
+    {
+      "id": 34,
+      "name": "Rates/Bond Trend Basket"
+    },
+    {
+      "id": 35,
+      "name": "Economic-Trend Confirmation"
+    },
+    {
+      "id": 36,
+      "name": "Classic Value (Book-to-Market)"
+    },
+    {
+      "id": 37,
+      "name": "Earnings-Yield Value"
+    },
+    {
+      "id": 38,
+      "name": "Free-Cash-Flow Yield"
+    },
+    {
+      "id": 39,
+      "name": "EV/EBITDA Value"
+    },
+    {
+      "id": 40,
+      "name": "Shareholder Yield"
+    },
+    {
+      "id": 41,
+      "name": "Dividend Quality"
+    },
+    {
+      "id": 42,
+      "name": "Quality Minus Junk (Long-Biased)"
+    },
+    {
+      "id": 43,
+      "name": "ROIC / Economic-Profit Quality"
+    },
+    {
+      "id": 44,
+      "name": "Low Accruals"
+    },
+    {
+      "id": 45,
+      "name": "Conservative Investment Factor"
+    },
+    {
+      "id": 46,
+      "name": "Minimum-Variance Equity"
+    },
+    {
+      "id": 47,
+      "name": "Low-Volatility Screen"
+    },
+    {
+      "id": 48,
+      "name": "Quality + Low Volatility"
+    },
+    {
+      "id": 49,
+      "name": "Value + Low Volatility"
+    },
+    {
+      "id": 50,
+      "name": "Quality + Momentum"
+    },
+    {
+      "id": 51,
+      "name": "FX Carry Basket"
+    },
+    {
+      "id": 52,
+      "name": "FX Carry + Momentum Filter"
+    },
+    {
+      "id": 53,
+      "name": "Commodity Carry / Curve Roll"
+    },
+    {
+      "id": 54,
+      "name": "Bond Carry + Roll-Down"
+    },
+    {
+      "id": 55,
+      "name": "Credit Carry with Trend/Risk Filter"
+    },
+    {
+      "id": 56,
+      "name": "Cross-Asset Carry"
+    },
+    {
+      "id": 57,
+      "name": "Value + Carry"
+    },
+    {
+      "id": 58,
+      "name": "Macro Regime Carry Allocation"
+    },
+    {
+      "id": 59,
+      "name": "Yield-Curve Steepener/Flattener with Macro Confirmation"
+    },
+    {
+      "id": 60,
+      "name": "Global Macro Multi-Signal"
+    },
+    {
+      "id": 61,
+      "name": "Cointegration Statistical Arbitrage"
+    },
+    {
+      "id": 62,
+      "name": "Sector-Neutral Mean Reversion"
+    },
+    {
+      "id": 63,
+      "name": "Index Futures Cash-and-Carry Basis"
+    },
+    {
+      "id": 64,
+      "name": "Futures Calendar-Spread Relative Value"
+    },
+    {
+      "id": 65,
+      "name": "ETF vs NAV / Basket Arbitrage"
+    },
+    {
+      "id": 66,
+      "name": "ADR / Local-Share Relative Value"
+    },
+    {
+      "id": 67,
+      "name": "Dual-Class Share Spread"
+    },
+    {
+      "id": 68,
+      "name": "Closed-End Fund Discount Mean Reversion"
+    },
+    {
+      "id": 69,
+      "name": "Yield-Curve Butterfly Relative Value"
+    },
+    {
+      "id": 70,
+      "name": "Cross-Sectional Bond Relative Value"
+    },
+    {
+      "id": 71,
+      "name": "Short-Horizon Index Reversal"
+    },
+    {
+      "id": 72,
+      "name": "VWAP/Anchored-Mean Reversion with Trend Filter"
+    },
+    {
+      "id": 73,
+      "name": "Merger Arbitrage with Deal-Quality Scoring"
+    },
+    {
+      "id": 74,
+      "name": "Spin-Off Special Situations"
+    },
+    {
+      "id": 75,
+      "name": "Index-Reconstitution Flow Trading"
+    },
+    {
+      "id": 76,
+      "name": "Buyback Announcement + Quality Filter"
+    },
+    {
+      "id": 77,
+      "name": "Insider-Buying Confirmation"
+    },
+    {
+      "id": 78,
+      "name": "Earnings Gap Continuation"
+    },
+    {
+      "id": 79,
+      "name": "Guidance / Revision Acceleration"
+    },
+    {
+      "id": 80,
+      "name": "Special-Situations Basket"
+    },
+    {
+      "id": 81,
+      "name": "Distressed-to-Recovery Trend"
+    },
+    {
+      "id": 82,
+      "name": "Catalyst Value + Momentum"
+    },
+    {
+      "id": 83,
+      "name": "Dynamic Covered Calls"
+    },
+    {
+      "id": 84,
+      "name": "Cash-Secured PutWrite with Trend Filter"
+    },
+    {
+      "id": 85,
+      "name": "Put-Spread Premium Harvesting"
+    },
+    {
+      "id": 86,
+      "name": "Delta-Hedged Volatility Risk Premium"
+    },
+    {
+      "id": 87,
+      "name": "Index Dispersion Trading"
+    },
+    {
+      "id": 88,
+      "name": "Volatility Term-Structure Relative Value"
+    },
+    {
+      "id": 89,
+      "name": "Skew Risk-Premium Spread"
+    },
+    {
+      "id": 90,
+      "name": "Collar Overlay"
+    },
+    {
+      "id": 91,
+      "name": "Tail Hedge + Carry Portfolio"
+    },
+    {
+      "id": 92,
+      "name": "Long-Gamma Around Known Catalysts"
+    },
+    {
+      "id": 93,
+      "name": "Passive Market Making / Liquidity Provision"
+    },
+    {
+      "id": 94,
+      "name": "Order-Book Imbalance Scalping"
+    },
+    {
+      "id": 95,
+      "name": "Opening-Range Breakout + Regime Filters"
+    },
+    {
+      "id": 96,
+      "name": "Intraday Mean Reversion After Exhaustion"
+    },
+    {
+      "id": 97,
+      "name": "News-Momentum with Liquidity Gate"
+    },
+    {
+      "id": 98,
+      "name": "Ensemble of Trend + Value + Carry + Quality"
+    },
+    {
+      "id": 99,
+      "name": "Regime-Aware Multi-Strategy Allocation"
+    },
+    {
+      "id": 100,
+      "name": "Risk-First Adaptive Ensemble"
+    }
+  ],
+  "candlesticks": [
+    {
+      "id": 1,
+      "name": "Bullish Engulfing"
+    },
+    {
+      "id": 2,
+      "name": "Bearish Engulfing"
+    },
+    {
+      "id": 3,
+      "name": "Hammer"
+    },
+    {
+      "id": 4,
+      "name": "Hanging Man"
+    },
+    {
+      "id": 5,
+      "name": "Inverted Hammer"
+    },
+    {
+      "id": 6,
+      "name": "Shooting Star"
+    },
+    {
+      "id": 7,
+      "name": "Morning Star"
+    },
+    {
+      "id": 8,
+      "name": "Evening Star"
+    },
+    {
+      "id": 9,
+      "name": "Morning Doji Star"
+    },
+    {
+      "id": 10,
+      "name": "Evening Doji Star"
+    },
+    {
+      "id": 11,
+      "name": "Piercing Line"
+    },
+    {
+      "id": 12,
+      "name": "Dark Cloud Cover"
+    },
+    {
+      "id": 13,
+      "name": "Three White Soldiers"
+    },
+    {
+      "id": 14,
+      "name": "Three Black Crows"
+    },
+    {
+      "id": 15,
+      "name": "Bullish Harami"
+    },
+    {
+      "id": 16,
+      "name": "Bearish Harami"
+    },
+    {
+      "id": 17,
+      "name": "Bullish Harami Cross"
+    },
+    {
+      "id": 18,
+      "name": "Bearish Harami Cross"
+    },
+    {
+      "id": 19,
+      "name": "Doji"
+    },
+    {
+      "id": 20,
+      "name": "Dragonfly Doji"
+    },
+    {
+      "id": 21,
+      "name": "Gravestone Doji"
+    },
+    {
+      "id": 22,
+      "name": "Long-Legged Doji"
+    },
+    {
+      "id": 23,
+      "name": "Four-Price Doji"
+    },
+    {
+      "id": 24,
+      "name": "Spinning Top"
+    },
+    {
+      "id": 25,
+      "name": "Bullish Marubozu"
+    },
+    {
+      "id": 26,
+      "name": "Bearish Marubozu"
+    },
+    {
+      "id": 27,
+      "name": "Three Inside Up"
+    },
+    {
+      "id": 28,
+      "name": "Three Inside Down"
+    },
+    {
+      "id": 29,
+      "name": "Three Outside Up"
+    },
+    {
+      "id": 30,
+      "name": "Three Outside Down"
+    },
+    {
+      "id": 31,
+      "name": "Bullish Tweezer Bottom"
+    },
+    {
+      "id": 32,
+      "name": "Bearish Tweezer Top"
+    },
+    {
+      "id": 33,
+      "name": "Rising Three Methods"
+    },
+    {
+      "id": 34,
+      "name": "Falling Three Methods"
+    },
+    {
+      "id": 35,
+      "name": "Bullish Separating Lines"
+    },
+    {
+      "id": 36,
+      "name": "Bearish Separating Lines"
+    },
+    {
+      "id": 37,
+      "name": "Bullish Belt Hold"
+    },
+    {
+      "id": 38,
+      "name": "Bearish Belt Hold"
+    },
+    {
+      "id": 39,
+      "name": "Bullish Kicker"
+    },
+    {
+      "id": 40,
+      "name": "Bearish Kicker"
+    },
+    {
+      "id": 41,
+      "name": "Bullish Abandoned Baby"
+    },
+    {
+      "id": 42,
+      "name": "Bearish Abandoned Baby"
+    },
+    {
+      "id": 43,
+      "name": "Upside Tasuki Gap"
+    },
+    {
+      "id": 44,
+      "name": "Downside Tasuki Gap"
+    },
+    {
+      "id": 45,
+      "name": "Mat Hold"
+    },
+    {
+      "id": 46,
+      "name": "Bullish Counterattack Line"
+    },
+    {
+      "id": 47,
+      "name": "Bearish Counterattack Line"
+    },
+    {
+      "id": 48,
+      "name": "Bullish Pin Bar / Rejection Candle"
+    },
+    {
+      "id": 49,
+      "name": "Bearish Pin Bar / Rejection Candle"
+    },
+    {
+      "id": 50,
+      "name": "Inside Bar Breakout"
+    }
+  ],
+  "filters": [
+    {
+      "id": 1,
+      "name": "Primary market regime"
+    },
+    {
+      "id": 2,
+      "name": "Benchmark direction"
+    },
+    {
+      "id": 3,
+      "name": "Market breadth"
+    },
+    {
+      "id": 4,
+      "name": "Volatility regime"
+    },
+    {
+      "id": 5,
+      "name": "Opening gap condition"
+    },
+    {
+      "id": 6,
+      "name": "Global cue alignment"
+    },
+    {
+      "id": 7,
+      "name": "Macro/event calendar"
+    },
+    {
+      "id": 8,
+      "name": "Rates, liquidity and FX context"
+    },
+    {
+      "id": 9,
+      "name": "Risk-on / risk-off confirmation"
+    },
+    {
+      "id": 10,
+      "name": "Time-of-day regime"
+    },
+    {
+      "id": 11,
+      "name": "Sector trend"
+    },
+    {
+      "id": 12,
+      "name": "Sector breadth"
+    },
+    {
+      "id": 13,
+      "name": "Stock vs benchmark relative strength"
+    },
+    {
+      "id": 14,
+      "name": "Stock vs sector relative strength"
+    },
+    {
+      "id": 15,
+      "name": "Leadership persistence"
+    },
+    {
+      "id": 16,
+      "name": "Peer confirmation"
+    },
+    {
+      "id": 17,
+      "name": "Index/ETF participation"
+    },
+    {
+      "id": 18,
+      "name": "Institutional-flow context"
+    },
+    {
+      "id": 19,
+      "name": "Revenue growth"
+    },
+    {
+      "id": 20,
+      "name": "EPS and earnings quality"
+    },
+    {
+      "id": 21,
+      "name": "Margin trend"
+    },
+    {
+      "id": 22,
+      "name": "ROE / ROCE quality"
+    },
+    {
+      "id": 23,
+      "name": "Free cash flow"
+    },
+    {
+      "id": 24,
+      "name": "Leverage and interest coverage"
+    },
+    {
+      "id": 25,
+      "name": "Promoter holding, pledging and governance"
+    },
+    {
+      "id": 26,
+      "name": "Institutional ownership and revisions"
+    },
+    {
+      "id": 27,
+      "name": "Valuation vs history and peers"
+    },
+    {
+      "id": 28,
+      "name": "Earnings guidance and revisions"
+    },
+    {
+      "id": 29,
+      "name": "Company catalyst quality"
+    },
+    {
+      "id": 30,
+      "name": "Corporate-action and event risk"
+    },
+    {
+      "id": 31,
+      "name": "Market structure"
+    },
+    {
+      "id": 32,
+      "name": "Support and resistance location"
+    },
+    {
+      "id": 33,
+      "name": "VWAP / anchored VWAP"
+    },
+    {
+      "id": 34,
+      "name": "EMA / trend alignment"
+    },
+    {
+      "id": 35,
+      "name": "Volume and relative volume"
+    },
+    {
+      "id": 36,
+      "name": "ATR and range context"
+    },
+    {
+      "id": 37,
+      "name": "Breakout / retest quality"
+    },
+    {
+      "id": 38,
+      "name": "Gap analysis"
+    },
+    {
+      "id": 39,
+      "name": "Opening range"
+    },
+    {
+      "id": 40,
+      "name": "Multi-timeframe and momentum alignment"
+    },
+    {
+      "id": 41,
+      "name": "Liquidity and turnover gate"
+    },
+    {
+      "id": 42,
+      "name": "Bid-ask spread, depth and impact cost"
+    },
+    {
+      "id": 43,
+      "name": "Order type and price protection"
+    },
+    {
+      "id": 44,
+      "name": "Expected slippage and total transaction cost"
+    },
+    {
+      "id": 45,
+      "name": "Reward/risk and room to obstacle"
+    },
+    {
+      "id": 46,
+      "name": "Position sizing from risk"
+    },
+    {
+      "id": 47,
+      "name": "Stop, invalidation and exit logic"
+    },
+    {
+      "id": 48,
+      "name": "Portfolio correlation and concentration"
+    },
+    {
+      "id": 49,
+      "name": "Daily/weekly kill switches and drawdown throttle"
+    },
+    {
+      "id": 50,
+      "name": "No-trade and strategy-decay gate"
+    }
+  ],
+  "combinations": [
+    "Trend pullback continuation",
+    "False-break reversal",
+    "Compression breakout",
+    "VWAP reclaim/reject",
+    "Breakout-retest",
+    "Exhaustion reversal",
+    "Gap continuation",
+    "Multi-timeframe alignment"
+  ]
+}
