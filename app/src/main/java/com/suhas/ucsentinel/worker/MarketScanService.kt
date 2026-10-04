@@ -15,6 +15,7 @@ import com.suhas.globaledgeai.notifications.AppNotifier
 import kotlinx.coroutines.*
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.time.LocalTime
 
 class MarketScanService: Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -126,6 +127,10 @@ class MarketScanService: Service() {
                                         repo.markPressureScanAt(System.currentTimeMillis())
                                         val uc = dual.uc.candidates.filter{"UC_LIVE" in it.activeStrategies}
                                         AppNotifier.notifyBuyableUc(this@MarketScanService,uc)
+                                        if(nowZ.toLocalTime()>=LocalTime.of(15,15)&&nowZ.toLocalTime()<=LocalTime.of(15,30)){
+                                            val threePm=runCatching{repo.scanUpperCircuitThreePm()}.getOrDefault(emptyList())
+                                            if(threePm.isNotEmpty())AppNotifier.notifyThreePmUc(this@MarketScanService,threePm)
+                                        }
                                         DiagnosticLog.log(this@MarketScanService,"UC/PRESSURE","pass uc=${dual.uc.candidates.size} pressure=${dual.demand.candidates.size} ucMsg=${dual.uc.message.take(140)} pressureMsg=${dual.demand.message.take(140)}")
                                     }
                                     .onFailure { DiagnosticLog.log(this@MarketScanService,"UC/PRESSURE","scan failed",it) }

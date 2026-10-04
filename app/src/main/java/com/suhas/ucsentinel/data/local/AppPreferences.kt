@@ -42,7 +42,7 @@ class AppPreferences(private val context:Context){
         demandPressureMaxBuySellRatio=prefs.getFloat("pressure_max_current_ratio",8f).toDouble(),maxFinalCandidates=prefs.getInt("max_candidates",3),
         maxDemandCandidates=prefs.getInt("max_demand_candidates",5),maxQuotesPerScan=prefs.getInt("max_quotes",120),excludeFnoLinked=prefs.getBoolean("exclude_fno_linked",true),
         includeSmeSeries=prefs.getBoolean("include_sme",true),newListingDays=prefs.getInt("new_listing_days",45),freezeHour=prefs.getInt("freeze_hour",15),
-        freezeMinute=prefs.getInt("freeze_minute",0),autoScanEnabled=prefs.getBoolean("auto_scan",true),pressureAutoScanEnabled=prefs.getBoolean("pressure_auto_scan",true),
+        freezeMinute=prefs.getInt("freeze_minute",30),autoScanEnabled=prefs.getBoolean("auto_scan",true),pressureAutoScanEnabled=prefs.getBoolean("pressure_auto_scan",true),
         pressureScanIntervalMinutes=prefs.getInt("pressure_scan_interval_minutes",15),learningEnabled=prefs.getBoolean("learning_enabled",true),
         learningIntervalHours=prefs.getInt("learning_interval_hours",24),memoryRetentionDays=prefs.getInt("memory_retention_days",90),demoMode=prefs.getBoolean("demo_mode",false),
         globalLeadEnabled=prefs.getBoolean("global_lead_enabled",true),globalLeadScanIntervalMinutes=prefs.getInt("global_lead_scan_interval_minutes",15),

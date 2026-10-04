@@ -90,6 +90,25 @@ object AppNotifier {
         runCatching{NotificationManagerCompat.from(context).notify(2201,n)}
     }
 
+    fun notifyThreePmUc(context:Context,candidates:List<Candidate>){
+        if(candidates.isEmpty()||!allowed(context))return
+        ensureChannel(context)
+        val top=candidates.take(5)
+        val fingerprint=top.joinToString("|"){"${it.symbol}:${it.score.toInt()}"}
+        if(!shouldNotify(context,"uc3pm",fingerprint))return
+        val lines=top.map{c->
+            "LONG ${c.symbol} • score ${c.score.toInt()} • ₹${String.format(Locale.US,"%.2f",c.price)} • next-session UC prediction"
+        }
+        val n=NotificationCompat.Builder(context,UC_CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_notify_more)
+            .setContentTitle("3 PM next-session Upper Circuit list")
+            .setContentText(if(top.size==1)lines.first() else "${top.size} LONG candidates for the next trading day")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(lines.joinToString("\n")))
+            .setPriority(NotificationCompat.PRIORITY_HIGH).setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
+            .setAutoCancel(true).setContentIntent(pending(context,2251)).build()
+        runCatching{NotificationManagerCompat.from(context).notify(2251,n)}
+    }
+
     private data class GlobalAlertPlan(val trigger:Double,val stop:Double,val target1:Double,val target2:Double)
 
     private fun globalAlertPlan(c:GlobalLeadCandidate):GlobalAlertPlan{

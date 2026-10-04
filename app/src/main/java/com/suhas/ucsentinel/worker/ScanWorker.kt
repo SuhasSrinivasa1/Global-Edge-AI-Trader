@@ -50,8 +50,8 @@ class ScanWorker(appContext:Context,params:WorkerParameters):CoroutineWorker(app
 
             // WorkManager's supported periodic minimum is 15 minutes. Every heartbeat now runs
             // the complete UC + pressure scan, so the Upper Circuit tab no longer depends on
-            // the manual Scan all button. A foreground loop in MainViewModel adds 5-minute
-            // refreshes while the app is open.
+            // the manual Scan all button. MarketScanService owns the 5-minute live cadence;
+            // this worker only fills gaps when the service has gone stale.
             if(settings.autoScanEnabled){
                 val due=forceMarketPass||nowMs-repo.lastPressureScanAt()>=12L*60*1000
                 if(due){
@@ -65,6 +65,11 @@ class ScanWorker(appContext:Context,params:WorkerParameters):CoroutineWorker(app
                 if(nowMs-repo.lastPressureScanAt()>=intervalMs){
                     repo.scanDemandOnly()
                     repo.markPressureScanAt(nowMs)
+                }
+            }
+            if(settings.autoScanEnabled&&now>=LocalTime.of(15,15)&&now<=LocalTime.of(15,30)){
+                runCatching{repo.scanUpperCircuitThreePm()}.onSuccess{picks->
+                    if(picks.isNotEmpty())AppNotifier.notifyThreePmUc(applicationContext,picks)
                 }
             }
             if(settings.strategyTournamentEnabled){
