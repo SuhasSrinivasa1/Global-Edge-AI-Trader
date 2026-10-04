@@ -195,8 +195,12 @@ class ScannerEngine(
             progress("Analyzed ${idx + 1}/${confirmList.size}: ${instrument.tradingSymbol}")
         }
 
+        // v1.6.9: derive the LIVE threshold from the pool that can actually become LIVE.
+        // Previously non-executable high scorers could raise the adaptive threshold and starve
+        // otherwise valid executable candidates. NEXT SESSION research still uses the full pool.
+        val thresholdPool = if (nextSessionMode) candidates else candidates.filter { "UC_LIVE_READY" in it.activeStrategies }
         val thresholdDecision = if (settings.adaptiveRangesEnabled) {
-            AdaptiveRangeEngine.ucThreshold(settings.minScore, candidates.map { it.score }, settings.maxFinalCandidates)
+            AdaptiveRangeEngine.ucThreshold(settings.minScore, thresholdPool.map { it.score }, settings.maxFinalCandidates)
         } else null
         val effectiveThreshold = thresholdDecision?.threshold ?: settings.minScore
         val ranking=compareByDescending<Candidate> { it.score }

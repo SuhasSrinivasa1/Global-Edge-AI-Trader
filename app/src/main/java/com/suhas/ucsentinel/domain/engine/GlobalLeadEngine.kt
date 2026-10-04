@@ -70,30 +70,32 @@ class GlobalLeadEngine {
             if(directionalFromOpen>=2.8){score-=8;reasons+="Already extended from open"}
         }
 
-        val ist=ZoneId.of("Asia/Kolkata");val t=now.withZoneSameInstant(ist).toLocalTime();val date=now.withZoneSameInstant(ist).toLocalDate()
-        val todayOpen=date.atTime(9,15).atZone(ist).toInstant().toEpochMilli()
-        val previousClose=previousTradingDay(date).atTime(15,30).atZone(ist).toInstant().toEpochMilli()
-        val latestIndiaCloseDate=when{
-            date.dayOfWeek==DayOfWeek.SATURDAY||date.dayOfWeek==DayOfWeek.SUNDAY->previousTradingDay(date)
-            t<LocalTime.of(9,15)->previousTradingDay(date)
-            else->date
-        }
-        val latestIndiaClose=latestIndiaCloseDate.atTime(15,30).atZone(ist).toInstant().toEpochMilli()
+        val ist=ZoneId.of("Asia/Kolkata")
+        val nowIst=now.withZoneSameInstant(ist)
+        val t=nowIst.toLocalTime()
+        val date=nowIst.toLocalDate()
+        val phase=NseTradingCalendar2026.phase(nowIst)
+        val previousSession=NseTradingCalendar2026.previousTradingDate(date)
+        val previousClose=previousSession.atTime(NseTradingCalendar2026.close).atZone(ist).toInstant().toEpochMilli()
+        val todayOpen=date.atTime(NseTradingCalendar2026.open).atZone(ist).toInstant().toEpochMilli()
+        val latestCompletedSession=if(phase.tradingDate&&t>NseTradingCalendar2026.close) date else previousSession
+        val latestIndiaClose=latestCompletedSession.atTime(NseTradingCalendar2026.close).atZone(ist).toInstant().toEpochMilli()
         val signalFreshForToday=foreign.marketTimestamp>previousClose
-        val newAfterTodayOpen=foreign.marketTimestamp>todayOpen
+        val signalFreshForNext=foreign.marketTimestamp>latestIndiaClose
+        val newAfterTodayOpen=phase.tradingDate&&foreign.marketTimestamp>todayOpen
         if(!signalFreshForToday){score-=9;reasons+="Foreign signal is older than the latest India session boundary"}
 
         score=score.coerceIn(0.0,100.0)
         val foreignDirectionOk=foreignDirectional>0
         val overnightImpulse=maxOf(kotlin.math.abs(foreign.dayPct),kotlin.math.abs(foreign.gapPct),kotlin.math.abs(fs.excessPct))
         val action=when{
-            // Before India opens there is no meaningful Indian bid/ask confirmation yet. Rank from the
-            // completed/active foreign session and revalidate the Indian entry only after 09:15 IST.
-            t<LocalTime.of(9,15) -> if(score>=68&&overnightImpulse>=settings.globalMinForeignGapPct&&signalFreshForToday)GlobalLeadAction.NEXT_OPEN_WATCH else GlobalLeadAction.OBSERVE
+            // No LIVE action is legal outside an actual NSE regular session. Weekends, holidays,
+            // pre-open and post-close remain NEXT/research and must be revalidated with fresh India depth.
+            !phase.open -> if(score>=68&&overnightImpulse>=settings.globalMinForeignGapPct&&signalFreshForNext)GlobalLeadAction.NEXT_OPEN_WATCH else GlobalLeadAction.OBSERVE
             t<LocalTime.of(9,30) -> if(score>=76&&signalFreshForToday&&directionalFromOpen>=0.20&&foreignDirectionOk)GlobalLeadAction.ENTER_AFTER_OPEN else if(score>=72&&signalFreshForToday)GlobalLeadAction.WAIT_FOR_CONFIRMATION else GlobalLeadAction.OBSERVE
             t<LocalTime.of(14,45) -> if(score>=76&&directionalFromOpen>=0.25&&foreignDirectionOk)GlobalLeadAction.ENTER_AFTER_OPEN else if(score>=68)GlobalLeadAction.WAIT_FOR_CONFIRMATION else GlobalLeadAction.OBSERVE
             t<=LocalTime.of(15,5) -> if(score>=76&&((direction==GlobalLeadDirection.LONG&&p>=70)||directionalFromOpen>=0.50||newAfterTodayOpen))GlobalLeadAction.KEEP_NEXT_SESSION else if(score<64||(!newAfterTodayOpen&&directionalFromOpen<0.10))GlobalLeadAction.EXIT_BY_3PM else GlobalLeadAction.OBSERVE
-            else -> if(score>=76&&foreign.marketTimestamp>latestIndiaClose)GlobalLeadAction.NEXT_OPEN_WATCH else GlobalLeadAction.OBSERVE
+            else -> if(score>=76&&foreignDirectionOk)GlobalLeadAction.KEEP_NEXT_SESSION else GlobalLeadAction.OBSERVE
         }
         val confidence=when{score>=84->ConfidenceBand.VERY_HIGH;score>=74->ConfidenceBand.HIGH;score>=62->ConfidenceBand.MEDIUM;else->ConfidenceBand.LOW}
         return GlobalLeadCandidate(
@@ -107,6 +109,5 @@ class GlobalLeadEngine {
         )
     }
 
-    private fun previousTradingDay(d:LocalDate):LocalDate{var x=d.minusDays(1);while(x.dayOfWeek==DayOfWeek.SATURDAY||x.dayOfWeek==DayOfWeek.SUNDAY)x=x.minusDays(1);return x}
     private fun fmt(v:Double)=String.format("%.2f",v)
 }

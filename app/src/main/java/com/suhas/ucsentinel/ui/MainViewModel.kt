@@ -62,8 +62,7 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
                 delay(5_000L)
             }
         }
-        // v1.1.9: the foreground scheduler used to exist but was never invoked. Keep it in its own
-        // coroutine so slow network work never blocks the five-second persisted-state refresh above.
+        // v1.6.9: visible-app maintenance never starts market scanners; MarketScanService owns them.
         viewModelScope.launch{
             delay(3_000L)
             while(isActive){
@@ -83,10 +82,10 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
 
     private suspend fun runForegroundAutomation(){
         if(_state.value.busy)return
-        val settings=repo.settings()
-        val session=repo.marketSessionInfo()
         val now=System.currentTimeMillis()
-
+        // v1.6.9: the foreground service is the single owner of market scans.
+        // The ViewModel only performs lightweight governance/broker maintenance while visible,
+        // preventing duplicate UC/Strategy/Global Groww request bursts.
         if(now-lastForegroundGovernanceAt>=5L*60_000L){
             lastForegroundGovernanceAt=now
             runCatching{repo.closeExpiredStrategyCalls()}
@@ -96,53 +95,6 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
         if(now-lastBrokerReconcileAt>=60_000L){
             lastBrokerReconcileAt=now
             runCatching{repo.reconcileBrokerOrders()}
-        }
-
-        if(!session.isOpen){
-            if(settings.globalLeadEnabled && now-lastForegroundGlobalScanAt>=15L*60_000L){
-                lastForegroundGlobalScanAt=now
-                runCatching{repo.scanGlobalLead()}.onSuccess{summary->
-                    _state.value=_state.value.copy(globalLeadSummary=summary,lastGlobalLeadScanAt=summary.generatedAt,error=null)
-                }
-            }
-            return
-        }
-
-        val liveCadenceMs=5L*60_000L
-        // v1.6.2 keeps independent jobs but coordinates start times so the three engines do not
-        // compete for the same Groww live-data window. UC/Pressure has first priority, then Strategy, then Global.
-        if(settings.strategyTournamentEnabled && now-lastForegroundStrategyScanAt>=liveCadenceMs && foregroundStrategyJob?.isActive!=true && foregroundMarketJob?.isActive!=true && foregroundGlobalJob?.isActive!=true && !(settings.autoScanEnabled && now-lastForegroundMarketScanAt>=liveCadenceMs)){
-            lastForegroundStrategyScanAt=now
-            repo.markStrategyScanAttempt(now)
-            foregroundStrategyJob=viewModelScope.launch{
-                runCatching{repo.scanTradingStrategies()}.onSuccess{summary->
-                    _state.value=_state.value.copy(strategyTournamentSummary=summary,lastStrategyScanAt=summary.generatedAt,
-                        lastStrategyAttemptAt=repo.lastStrategyAttemptAt(),lastStrategyErrorAt=0L,lastStrategyError="",
-                        strategyLive=repo.strategyLiveRecommendations(),strategyClosed=repo.strategyClosedRecommendations(),error=null)
-                }.onFailure{t->
-                    repo.markStrategyScanError(t)
-                    _state.value=_state.value.copy(lastStrategyAttemptAt=repo.lastStrategyAttemptAt(),lastStrategyErrorAt=repo.lastStrategyErrorAt(),lastStrategyError=repo.lastStrategyError())
-                }
-            }
-        }
-        if(settings.autoScanEnabled && now-lastForegroundMarketScanAt>=liveCadenceMs && foregroundMarketJob?.isActive!=true && foregroundStrategyJob?.isActive!=true && foregroundGlobalJob?.isActive!=true){
-            lastForegroundMarketScanAt=now
-            foregroundMarketJob=viewModelScope.launch{
-                runCatching{repo.scanAll()}.onSuccess{dual->
-                    repo.markPressureScanAt()
-                    _state.value=_state.value.copy(dualSummary=dual,newListings=dual.newListings,status="Live market engines updated",error=null)
-                }.onFailure{t->
-                    if(repo.lastSavedDualSummary()==null)_state.value=_state.value.copy(status="Automatic scan will retry",error=t.message?.takeIf{it.isNotBlank()})
-                }
-            }
-        }
-        if(settings.globalLeadEnabled && now-lastForegroundGlobalScanAt>=liveCadenceMs && foregroundGlobalJob?.isActive!=true && foregroundMarketJob?.isActive!=true && foregroundStrategyJob?.isActive!=true && !(settings.autoScanEnabled && now-lastForegroundMarketScanAt>=liveCadenceMs) && !(settings.strategyTournamentEnabled && now-lastForegroundStrategyScanAt>=liveCadenceMs)){
-            lastForegroundGlobalScanAt=now
-            foregroundGlobalJob=viewModelScope.launch{
-                runCatching{repo.scanGlobalLead()}.onSuccess{summary->
-                    _state.value=_state.value.copy(globalLeadSummary=summary,lastGlobalLeadScanAt=summary.generatedAt,error=null)
-                }
-            }
         }
     }
 

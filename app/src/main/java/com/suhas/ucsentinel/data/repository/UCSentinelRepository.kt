@@ -1100,38 +1100,45 @@ class GlobalEdgeAITraderRepository(context:Context){
         val surviving=mutableListOf<StrategyRecommendation>()
         val durableLearningUpdates=mutableListOf<Triple<StrategySetup,Double,Boolean>>()
         for(r in existingLive){
-            val openedDate=Instant.ofEpochMilli(r.openedAt).atZone(ist).toLocalDate()
+            val opened=Instant.ofEpochMilli(r.openedAt).atZone(ist)
+            val openedDate=opened.toLocalDate()
+            val oldDay=openedDate<date
             val q=quote(r.setup.symbol)
-            val px=q?.lastPrice?.takeIf{it.isFinite()&&it>0.0}?:r.lastPrice
+            val currentPx=q?.lastPrice?.takeIf{it.isFinite()&&it>0.0}?:r.lastPrice
             val target=if(r.setup.direction==TradeDirection.LONG)r.setup.entryPrice*(1+r.setup.targetPct/100.0) else r.setup.entryPrice*(1-r.setup.targetPct/100.0)
             val stop=if(r.setup.direction==TradeDirection.LONG)r.setup.entryPrice*(1-r.setup.stopPct/100.0) else r.setup.entryPrice*(1+r.setup.stopPct/100.0)
-            val hitTarget=if(r.setup.direction==TradeDirection.LONG)px>=target else px<=target
-            val hitStop=if(r.setup.direction==TradeDirection.LONG)px<=stop else px>=stop
-            val oldDay=openedDate<date
-            val eod=now.toLocalTime()>=LocalTime.of(15,30)
-            val status=when{
-                hitTarget->StrategyRecommendationStatus.WIN
-                hitStop->StrategyRecommendationStatus.LOSS
-                oldDay||eod->StrategyRecommendationStatus.LOSS
-                else->StrategyRecommendationStatus.LIVE
+            val pathEnd=if(oldDay) openedDate.atTime(15,31).atZone(ist) else now.plusMinutes(1)
+            val pathCandles=runCatching{groww.getHistoricalCandles(token,r.setup.symbol,opened.format(dateTimeFmt),pathEnd.format(dateTimeFmt),"5minute")}.getOrNull()
+            var pathStatus:StrategyRecommendationStatus?=null
+            var exitPx=if(oldDay)r.lastPrice else currentPx
+            pathCandles?.sortedBy{it.epochSeconds}?.forEach{c->
+                if(pathStatus!=null||!c.high.isFinite()||!c.low.isFinite())return@forEach
+                val targetHit=if(r.setup.direction==TradeDirection.LONG)c.high>=target else c.low<=target
+                val stopHit=if(r.setup.direction==TradeDirection.LONG)c.low<=stop else c.high>=stop
+                when{
+                    targetHit&&stopHit->{pathStatus=StrategyRecommendationStatus.LOSS;exitPx=stop}
+                    stopHit->{pathStatus=StrategyRecommendationStatus.LOSS;exitPx=stop}
+                    targetHit->{pathStatus=StrategyRecommendationStatus.WIN;exitPx=target}
+                }
             }
+            val eod=now.toLocalTime()>=LocalTime.of(15,30)
+            val status=pathStatus?:if(oldDay||eod)StrategyRecommendationStatus.LOSS else StrategyRecommendationStatus.LIVE
             if(status==StrategyRecommendationStatus.LIVE){
                 val sp=q?.let(::spreadPct)?:r.spreadPct
-                surviving+=r.copy(lastSeenAt=System.currentTimeMillis(),lastPrice=px,tradedValue=q?.let{it.volume*it.lastPrice}?:r.tradedValue,volume=q?.volume?:r.volume,spreadPct=sp)
+                surviving+=r.copy(lastSeenAt=System.currentTimeMillis(),lastPrice=currentPx,tradedValue=q?.let{it.volume*it.lastPrice}?:r.tradedValue,volume=q?.volume?:r.volume,spreadPct=sp)
             }else{
-                val ret=returnPct(r.setup,px)
+                if(pathStatus==null)exitPx=pathCandles?.lastOrNull()?.close?.takeIf{it.isFinite()&&it>0.0}?:r.lastPrice.takeIf{it.isFinite()&&it>0.0}?:currentPx
+                val ret=returnPct(r.setup,exitPx)
                 val reason=when(status){
                     StrategyRecommendationStatus.WIN->"Target reached"
-                    StrategyRecommendationStatus.LOSS->if(hitStop)"Stop reached" else "Target not reached by session close"
+                    StrategyRecommendationStatus.LOSS->if(pathStatus==StrategyRecommendationStatus.LOSS)"Stop reached" else "Target not reached by session close"
                     StrategyRecommendationStatus.EXPIRED->"Legacy expired call"
                     else->"Closed"
                 }
-                val done=r.copy(lastSeenAt=System.currentTimeMillis(),lastPrice=px,closedAt=System.currentTimeMillis(),exitPrice=px,status=status,returnPct=ret,closeReason=reason,
+                val done=r.copy(lastSeenAt=System.currentTimeMillis(),lastPrice=exitPx,closedAt=System.currentTimeMillis(),exitPrice=exitPx,status=status,returnPct=ret,closeReason=reason,
                     tradedValue=q?.let{it.volume*it.lastPrice}?:r.tradedValue,volume=q?.volume?:r.volume,spreadPct=q?.let(::spreadPct)?:r.spreadPct)
                 closed.removeAll{it.id==done.id};closed.add(done)
-                if(status==StrategyRecommendationStatus.WIN||status==StrategyRecommendationStatus.LOSS){
-                    durableLearningUpdates+=Triple(r.setup,ret,status==StrategyRecommendationStatus.WIN)
-                }
+                if(status==StrategyRecommendationStatus.WIN||status==StrategyRecommendationStatus.LOSS)durableLearningUpdates+=Triple(r.setup,ret,status==StrategyRecommendationStatus.WIN)
             }
         }
 
@@ -1466,12 +1473,43 @@ class GlobalEdgeAITraderRepository(context:Context){
             if(ucLive.isNotEmpty())recordCandidateCalls(ScannerSection.UC_CONTINUATION,TradeCallBucket.LIVE,ucLive,"UC live scan",scanNowMs)
         }
         if(liveSessionOpen&&!demand.message.startsWith("WATCHLIST ONLY"))recordCandidateCalls(ScannerSection.DEMAND_SQUEEZE,TradeCallBucket.LIVE,demand.candidates,"Pressure live scan",scanNowMs)
-        val ucThreePm=uc.candidates.filter{"UC_LIVE" in it.activeStrategies}
-        if(scanNow.toLocalTime()>=LocalTime.of(15,0)&&scanNow.toLocalTime()<=LocalTime.of(15,30)&&ucThreePm.isNotEmpty()){
-            val alreadyThreePm=prefs.loadTradeCalls(1500).any{it.engine==TradeCallEngine.UPPER_CIRCUIT&&it.bucket==TradeCallBucket.THREE_PM&&Instant.ofEpochMilli(it.openedAt).atZone(ist).toLocalDate()==scanNow.toLocalDate()}
-            if(!alreadyThreePm)recordCandidateCalls(ScannerSection.UC_CONTINUATION,TradeCallBucket.THREE_PM,ucThreePm.take(settings.maxFinalCandidates.coerceAtLeast(1)),"UC 3 PM final list",scanNowMs)
-        }
+        // v1.6.9: 3 PM next-day picks are produced by scanUpperCircuitThreePm().
+        // They intentionally do not depend on the same-day UC_LIVE gate.
         DualScanSummary(uc,demand,listings).also{summary->lastDualSummary=summary;lastDualScanAt=maxOf(uc.completedAt,demand.completedAt)}
+    }
+
+    suspend fun scanUpperCircuitThreePm(progress:suspend(String)->Unit={}):List<Candidate>=scanMutex.withLock{
+        val now=ZonedDateTime.now(ist)
+        val time=now.toLocalTime()
+        val session=marketSessionInfo(now)
+        if(!session.isOpen||time<LocalTime.of(15,15)||time>LocalTime.of(15,30))return@withLock emptyList()
+        val today=now.toLocalDate()
+        val already=prefs.loadTradeCalls(1500).any{
+            it.engine==TradeCallEngine.UPPER_CIRCUIT&&it.bucket==TradeCallBucket.THREE_PM&&it.outcome==TradeCallOutcome.OPEN&&
+                Instant.ofEpochMilli(it.openedAt).atZone(ist).toLocalDate()==today
+        }
+        if(already)return@withLock emptyList()
+        require(ensureAutomationAuthentication()){"Groww authentication is required for 3 PM UC prediction"}
+        val token=secureStore.accessToken()
+        val settings=prefs.loadSettings()
+        val universe=if(instruments.cached().isEmpty())instruments.refresh() else instruments.cached()
+        val listings=if(newListingsCache.isEmpty())runCatching{refreshNewListings()}.getOrDefault(emptyList()) else newListingsCache
+        val symbols=universe.asSequence().filter{ExecutionQuality.eligibleInstrument(it)}.map{it.tradingSymbol}.distinct().toList()
+        progress("3 PM UC: preparing full-NSE next-session snapshot")
+        groww.prefetchOhlcSnapshot(token,symbols,progress)
+        val research=withUcEvidenceContext(
+            ucScanner.scan(token,universe,listings,settings,prefs.adaptivePrecisionMap(ScannerSection.UC_CONTINUATION,SignalEngine.MODEL_VERSION),progress,nextSessionMode=true,
+                rejectedShadow={c,reason->recordRejectedCandidateShadow(ScannerSection.UC_CONTINUATION,TradeCallBucket.THREE_PM,c,reason)})
+        )
+        val picks=research.candidates.filter{"UC_LIVE" in it.activeStrategies}
+            .sortedWith(compareByDescending<Candidate>{it.score}.thenByDescending{it.buySellRatio}.thenByDescending{it.volumeRatio})
+            .take(settings.maxFinalCandidates.coerceIn(1,5))
+        prefs.setLastNearCloseAutoScanAt(System.currentTimeMillis())
+        if(picks.isNotEmpty()){
+            recordCandidateCalls(ScannerSection.UC_CONTINUATION,TradeCallBucket.THREE_PM,picks,"UC 3 PM next-trading-day LONG prediction",System.currentTimeMillis())
+            DiagnosticLog.log(appContext,"UC-3PM","published ${picks.size} next-session LONG pick(s): ${picks.joinToString{it.symbol}}")
+        }else DiagnosticLog.log(appContext,"UC-3PM","no qualified next-session pick; retry allowed until 15:30")
+        picks
     }
 
     suspend fun scanUpperCircuitNextSession(progress:suspend(String)->Unit={}):ScanSummary=scanMutex.withLock{

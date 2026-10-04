@@ -256,7 +256,8 @@ fun UpperCircuitCompactScreen(state:UiState,vm:MainViewModel,padding:PaddingValu
             UcCompactView.THREE_PM->{
                 if(threePmCalls.isEmpty())item{EmptyState("No qualified 3 PM list yet","The first non-empty UC candidate scan from 15:00–15:30 IST freezes the final next-session 3 PM list, independently of the LIVE gate.")}
                 else items(threePmCalls.take(50),key={it.id}){r->
-                    TradeCard(r.symbol,"3 PM • PRE-UC",r.score,tradeCallPlan(r),r.detail,"Buy window 15:00–15:30 • target session ${r.targetSessionDate}")
+                    TradeCard(r.symbol,"3 PM • NEXT-DAY PRE-UC",r.score,tradeCallPlan(r),r.detail,
+                        "LONG ONLY • buy window 15:00–15:30 • predicts UC attempt on ${r.targetSessionDate} • tap MODEL score to place manually",orderable=true,vm=vm)
                 }
             }
             UcCompactView.CLOSED->{
@@ -484,7 +485,7 @@ fun GlobalCompactScreen(state:UiState,vm:MainViewModel,padding:PaddingValues){
     val summary=state.globalLeadSummary
     val all=summary?.candidates.orEmpty().sortedByDescending{it.score}
     val next=all.filter{it.action==GlobalLeadAction.NEXT_OPEN_WATCH}
-    val live=all.filter{(it.action==GlobalLeadAction.ENTER_AFTER_OPEN||it.action==GlobalLeadAction.KEEP_NEXT_SESSION)&&it.indianPrice>=20.0}
+    val live=if(state.marketSession.isOpen) all.filter{(it.action==GlobalLeadAction.ENTER_AFTER_OPEN||it.action==GlobalLeadAction.KEEP_NEXT_SESSION)&&it.indianPrice>=20.0} else emptyList()
     val closed=state.tradeCalls.filter{it.engine==TradeCallEngine.GLOBAL&&it.bucket==TradeCallBucket.LIVE&&it.outcome!=TradeCallOutcome.OPEN}.sortedByDescending{it.closedAt}
     val preOpen=state.marketSession.phase!=MarketPhase.OPEN
     var view by remember(state.marketSession.phase){mutableStateOf(if(preOpen)GlobalCompactView.NEXT_SESSION else GlobalCompactView.LIVE)}
