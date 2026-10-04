@@ -1478,7 +1478,7 @@ class GlobalEdgeAITraderRepository(context:Context){
         DualScanSummary(uc,demand,listings).also{summary->lastDualSummary=summary;lastDualScanAt=maxOf(uc.completedAt,demand.completedAt)}
     }
 
-    suspend fun scanUpperCircuitThreePm(progress:suspend(String)->Unit={}):List<Candidate>=scanMutex.withLock{
+    suspend fun scanUpperCircuitThreePm(progress:suspend(String)->Unit={}):List<Candidate> = scanMutex.withLock{
         val now=ZonedDateTime.now(ist)
         val time=now.toLocalTime()
         val session=marketSessionInfo(now)
