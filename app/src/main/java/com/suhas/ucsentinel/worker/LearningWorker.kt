@@ -10,7 +10,11 @@ class LearningWorker(appContext:Context,params:WorkerParameters):CoroutineWorker
     override suspend fun doWork():Result{
         val repo=(applicationContext as GlobalEdgeApplication).repository
         if(!repo.settings().learningEnabled)return Result.success()
-        DiagnosticLog.log(applicationContext,"LEARNING-WORKER","learning worker start")
+        if(repo.scannerHeartbeatFresh()){
+            DiagnosticLog.log(applicationContext,"LEARNING-WORKER","foreground service heartbeat fresh; duplicate learning pass skipped")
+            return Result.success()
+        }
+        DiagnosticLog.log(applicationContext,"LEARNING-WORKER","stale-service learning fallback start")
 
         return try{
             val msg=repo.runAutonomousLearningPass()

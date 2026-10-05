@@ -6,6 +6,7 @@ import androidx.work.WorkerParameters
 import com.suhas.globaledgeai.GlobalEdgeApplication
 import com.suhas.globaledgeai.diagnostics.DiagnosticLog
 import com.suhas.globaledgeai.notifications.AppNotifier
+import com.suhas.globaledgeai.domain.engine.AutomationPolicy
 import java.time.LocalTime
 import java.time.ZonedDateTime
 import java.time.ZoneId
@@ -17,98 +18,83 @@ class ScanWorker(appContext:Context,params:WorkerParameters):CoroutineWorker(app
         val nowZ=ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
         val session=repo.marketSessionInfo(nowZ)
         val now=nowZ.toLocalTime()
+        val nowMs=System.currentTimeMillis()
         val forceMarketPass=inputData.getBoolean("force_market_pass",false)
-        DiagnosticLog.log(applicationContext,"WORKER","ScanWorker start • phase="+session.phase+" • force="+forceMarketPass)
+        val serviceFresh=repo.scannerHeartbeatFresh(nowMs)
+        DiagnosticLog.log(applicationContext,"WORKER","ScanWorker start • phase="+session.phase+" • force="+forceMarketPass+" • serviceFresh="+serviceFresh)
 
-        if(settings.strategyTournamentEnabled){ runCatching{repo.refreshStrategyCatalog(false)} }
-
-        // Global Lead is cross-time-zone work and continues outside NSE hours.
-        if(settings.globalLeadEnabled){
-            runCatching{repo.refreshGlobalMappings(false)}
-            val intervalMinutes=settings.globalLeadScanIntervalMinutes.coerceIn(15,120)
-            if(forceMarketPass||System.currentTimeMillis()-repo.lastGlobalLeadScanAt()>=intervalMinutes.toLong()*60*1000){
-                runCatching{repo.scanGlobalLead()}
+        val inMarket=session.isOpen
+        if(inMarket&&settings.autoScanEnabled&&AutomationPolicy.isThreePmPriorityWindow(now)){
+            if(repo.ensureAutomationAuthentication()){
+                val due=!repo.hasThreePmUcToday()&&(forceMarketPass||nowMs-repo.lastNearCloseAutoScanAt()>=4L*60_000L)
+                if(due)runCatching{repo.scanUpperCircuitThreePm()}.onSuccess{picks->
+                    if(picks.isNotEmpty())AppNotifier.notifyThreePmUc(applicationContext,picks)
+                }.onFailure{DiagnosticLog.log(applicationContext,"UC-3PM","worker priority pass failed",it)}
             }
+            if(serviceFresh&&!forceMarketPass){
+                DiagnosticLog.log(applicationContext,"WORKER","3 PM backup checked; foreground service heartbeat fresh, skipping duplicate engines")
+                return Result.success()
+            }
+        }else if(serviceFresh&&!forceMarketPass){
+            DiagnosticLog.log(applicationContext,"WORKER","foreground service heartbeat fresh; stale-only worker skipped")
+            return Result.success()
         }
 
-        val inMarket=session.isTradingDay&&now>=LocalTime.of(9,15)&&now<=LocalTime.of(15,30)
+        // Best-effort service recovery on OEM-killed processes; if Android blocks background FGS start,
+        // this worker still performs the stale fallback below.
+        runCatching{MarketScanService.start(applicationContext)}
+            .onFailure{DiagnosticLog.log(applicationContext,"WORKER","foreground service recovery start not permitted",it)}
+
+        if(settings.strategyTournamentEnabled)runCatching{repo.refreshStrategyCatalog(false)}
+        if(settings.globalLeadEnabled)runCatching{repo.refreshGlobalMappings(false)}
+
         if(!inMarket){
-            // 15-minute WorkManager safety net for the two 24h research engines.
-            if(settings.autoScanEnabled&&repo.ensureAutomationAuthentication())runCatching{repo.scanUpperCircuitNextSession()}
+            if(settings.autoScanEnabled&&repo.ensureAutomationAuthentication()&&nowMs-repo.lastMarketDataSuccessAt()>=12L*60_000L)
+                runCatching{repo.scanUpperCircuitNextSession()}
+            if(settings.globalLeadEnabled&&nowMs-repo.lastGlobalLeadScanAt()>=15L*60_000L)runCatching{repo.scanGlobalLead()}
             runCatching{repo.closeExpiredStrategyCalls()}
             runCatching{repo.reconcileTradeCallLedger()}
-            runCatching{repo.runAutonomousLearningPass()}
             repo.ensureTodayFreezeAudit(nowZ)
-            DiagnosticLog.log(applicationContext,"WORKER","off-hours safety-net pass complete")
+            DiagnosticLog.log(applicationContext,"WORKER","off-hours stale fallback complete")
             return Result.success()
         }
 
         if(!repo.ensureAutomationAuthentication()){repo.ensureTodayFreezeAudit(nowZ);return Result.success()}
 
         suspend fun automatedPass(){
-            val nowMs=System.currentTimeMillis()
-
-            // WorkManager's supported periodic minimum is 15 minutes. Every heartbeat now runs
-            // the complete UC + pressure scan, so the Upper Circuit tab no longer depends on
-            // the manual Scan all button. MarketScanService owns the 5-minute live cadence;
-            // this worker only fills gaps when the service has gone stale.
-            if(settings.autoScanEnabled){
-                val due=forceMarketPass||nowMs-repo.lastPressureScanAt()>=12L*60*1000
-                if(due){
-                    val dual=repo.scanAll()
-                    val ucActionable=if(dual.uc.message.startsWith("WATCHLIST ONLY")) emptyList() else dual.uc.candidates
-                    AppNotifier.notifyBuyableUc(applicationContext,ucActionable)
-                    repo.markPressureScanAt(nowMs)
-                }
-            }else if(settings.pressureAutoScanEnabled){
+            if(settings.autoScanEnabled&&nowMs-repo.lastPressureScanAt()>=12L*60_000L){
+                val dual=repo.scanAll()
+                val ucActionable=dual.uc.candidates.filter{"UC_LIVE" in it.activeStrategies}
+                AppNotifier.notifyBuyableUc(applicationContext,ucActionable)
+                repo.markPressureScanAt(System.currentTimeMillis())
+            }else if(settings.pressureAutoScanEnabled&&!settings.autoScanEnabled){
                 val intervalMs=settings.pressureScanIntervalMinutes.coerceIn(15,120).toLong()*60*1000
-                if(nowMs-repo.lastPressureScanAt()>=intervalMs){
-                    repo.scanDemandOnly()
-                    repo.markPressureScanAt(nowMs)
-                }
+                if(nowMs-repo.lastPressureScanAt()>=intervalMs){repo.scanDemandOnly();repo.markPressureScanAt(System.currentTimeMillis())}
             }
-            if(settings.autoScanEnabled&&now>=LocalTime.of(15,15)&&now<=LocalTime.of(15,30)){
-                runCatching{repo.scanUpperCircuitThreePm()}.onSuccess{picks->
-                    if(picks.isNotEmpty())AppNotifier.notifyThreePmUc(applicationContext,picks)
-                }
+            if(settings.strategyTournamentEnabled&&nowMs-repo.lastStrategyScanAt()>=15L*60_000L){
+                repo.markStrategyScanAttempt(nowMs)
+                runCatching{repo.scanTradingStrategies()}.onSuccess{summary->
+                    val freshLive=repo.strategyLiveRecommendations().filter{it.openedAt>=summary.generatedAt-60_000L}.map{it.setup}
+                    AppNotifier.notifyStrategySetups(applicationContext,freshLive)
+                }.onFailure{repo.markStrategyScanError(it)}
             }
-            if(settings.strategyTournamentEnabled){
-                // v1.1.0: strategy discovery is an all-session engine, not a near-3-PM engine.
-                val strategyInterval=15L
-                if(forceMarketPass||nowMs-repo.lastStrategyScanAt()>=strategyInterval*60*1000){
-                    repo.markStrategyScanAttempt(nowMs)
-                    runCatching{repo.scanTradingStrategies()}.onSuccess{summary->
-                        val freshLive=repo.strategyLiveRecommendations()
-                            .filter{it.openedAt>=summary.generatedAt-60_000L}
-                            .map{it.setup}
-                        AppNotifier.notifyStrategySetups(applicationContext,freshLive)
-                    }.onFailure{repo.markStrategyScanError(it)}
-                }
+            if(settings.globalLeadEnabled&&nowMs-repo.lastGlobalLeadScanAt()>=12L*60_000L){
+                runCatching{repo.scanGlobalLead()}.onSuccess{summary->AppNotifier.notifyGlobalLead(applicationContext,summary.candidates)}
             }
-            if(settings.globalLeadEnabled){
-                runCatching{repo.scanGlobalLead()}.onSuccess{summary->
-                    AppNotifier.notifyGlobalLead(applicationContext,summary.longCandidates+summary.shortCandidates)
-                }
-            }
-            // Close the daily snapshot only after the market session has ended.
             repo.ensureTodayFreezeAudit(nowZ)
         }
 
         return try{
             automatedPass()
-            DiagnosticLog.log(applicationContext,"WORKER","market safety-net pass complete")
+            DiagnosticLog.log(applicationContext,"WORKER","market stale fallback complete")
             Result.success()
         }catch(t:Throwable){
             DiagnosticLog.log(applicationContext,"WORKER","ScanWorker failed",t)
             if(repo.isAuthenticationFailure(t)){
                 repo.invalidateAccessToken()
-                if(repo.ensureAutomationAuthentication()){
-                    runCatching{automatedPass()}.fold(onSuccess={Result.success()},onFailure={Result.retry()})
-                }else Result.success()
-            }else{
-                repo.ensureTodayFreezeAudit(nowZ)
-                Result.retry()
-            }
+                if(repo.ensureAutomationAuthentication())runCatching{automatedPass()}.fold(onSuccess={Result.success()},onFailure={Result.retry()})
+                else Result.success()
+            }else{repo.ensureTodayFreezeAudit(nowZ);Result.retry()}
         }
     }
 }

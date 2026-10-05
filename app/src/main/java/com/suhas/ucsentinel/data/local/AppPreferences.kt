@@ -671,6 +671,10 @@ class AppPreferences(private val context:Context){
         }
         e.apply()
     }
+    fun scannerHeartbeatAt():Long=prefs.getLong("scanner_service_heartbeat_at_v170",0L)
+    fun scannerHeartbeatStatus():String=prefs.getString("scanner_service_heartbeat_status_v170","").orEmpty()
+    fun setScannerHeartbeat(at:Long,status:String){prefs.edit().putLong("scanner_service_heartbeat_at_v170",at).putString("scanner_service_heartbeat_status_v170",status.take(160)).apply()}
+
     fun lastPressureScanAt():Long=prefs.getLong("last_pressure_scan_at",0L)
     fun setLastPressureScanAt(v:Long){prefs.edit().putLong("last_pressure_scan_at",v).apply()}
     fun lastNearCloseAutoScanAt():Long=prefs.getLong("last_near_close_auto_scan_at",0L)

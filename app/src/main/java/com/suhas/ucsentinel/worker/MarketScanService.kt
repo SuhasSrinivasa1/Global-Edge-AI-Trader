@@ -12,6 +12,7 @@ import com.suhas.globaledgeai.GlobalEdgeApplication
 import com.suhas.globaledgeai.MainActivity
 import com.suhas.globaledgeai.diagnostics.DiagnosticLog
 import com.suhas.globaledgeai.notifications.AppNotifier
+import com.suhas.globaledgeai.domain.engine.AutomationPolicy
 import kotlinx.coroutines.*
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -46,13 +47,42 @@ class MarketScanService: Service() {
 
     private suspend fun loop() {
         val repo = (application as GlobalEdgeApplication).repository
+        // Restore cadence from durable timestamps after OEM/process recreation instead of firing every engine again.
+        lastMarketPass=repo.lastPressureScanAt()
+        lastStrategyPass=repo.lastStrategyScanAt()
+        lastGlobalPass=repo.lastGlobalLeadScanAt()
+        lastLearningPass=repo.lastAutonomousLearningAt()
         while (scope.isActive) {
             val nowZ = ZonedDateTime.now(ist)
             val nowMs = System.currentTimeMillis()
             val session = repo.marketSessionInfo(nowZ)
             val settings = repo.settings()
             var status = if (session.isOpen) "Market open • 5 min synchronized scanner active" else "Off-hours • UC next-session + Global 24h research active"
+            repo.markScannerHeartbeat(status,nowMs)
             try {
+                // Absolute 3 PM priority: no Strategy/Global/normal UC job may occupy the 15:10–15:30 window
+                // before the next-session UC predictor gets its attempt.
+                if(session.isOpen&&settings.autoScanEnabled&&AutomationPolicy.isThreePmPriorityWindow(nowZ.toLocalTime())){
+                    status="3 PM UC PRIORITY • next-session LONG predictor"
+                    marketJob?.cancel(CancellationException("3 PM UC priority"))
+                    strategyJob?.cancel(CancellationException("3 PM UC priority"))
+                    globalJob?.cancel(CancellationException("3 PM UC priority"))
+                    if(repo.ensureAutomationAuthentication()){
+                        val due=!repo.hasThreePmUcToday()&&(nowMs-repo.lastNearCloseAutoScanAt()>=4L*60_000L)
+                        if(due){
+                            runCatching{withTimeout(270_000L){repo.scanUpperCircuitThreePm()}}
+                                .onSuccess{picks->
+                                    if(picks.isNotEmpty())AppNotifier.notifyThreePmUc(this,picks)
+                                    DiagnosticLog.log(this,"UC-3PM","priority pass completed • picks=${picks.size}")
+                                }
+                                .onFailure{DiagnosticLog.log(this,"UC-3PM","priority pass failed",it)}
+                        }
+                    }else status="3 PM UC PRIORITY • Groww authentication required"
+                    repo.markScannerHeartbeat(status,System.currentTimeMillis())
+                    updateNotification(status)
+                    delay(60_000L)
+                    continue
+                }
                 // Call governance is independent from model learning: it closes intraday ledgers,
                 // resolves WIN/LOSS outcomes and prevents stale LIVE calls from surviving overnight.
                 if (nowMs-lastGovernancePass >= 5L*60_000L) {
@@ -170,6 +200,7 @@ class MarketScanService: Service() {
             } catch (t: Throwable) {
                 DiagnosticLog.log(this,"SERVICE","loop error",t)
             }
+            repo.markScannerHeartbeat(status,System.currentTimeMillis())
             updateNotification(status)
             delay(60_000L)
         }
