@@ -117,6 +117,15 @@ class GlobalEdgeAITraderRepository(context:Context){
     fun newListings()=newListingsCache
     fun listingFeedHealth()=prefs.listingFeedHealth()
     fun lastMarketDataSuccessAt()=prefs.lastMarketDataSuccessAt()
+    fun scannerHeartbeatAt()=prefs.scannerHeartbeatAt()
+    fun scannerHeartbeatStatus()=prefs.scannerHeartbeatStatus()
+    fun markScannerHeartbeat(status:String,at:Long=System.currentTimeMillis())=prefs.setScannerHeartbeat(at,status)
+    fun scannerHeartbeatFresh(nowMs:Long=System.currentTimeMillis())=AutomationPolicy.serviceHeartbeatFresh(nowMs,prefs.scannerHeartbeatAt())
+    fun hasThreePmUcToday():Boolean{
+        val today=LocalDate.now(ist)
+        return prefs.loadTradeCalls(1500).any{it.engine==TradeCallEngine.UPPER_CIRCUIT&&it.bucket==TradeCallBucket.THREE_PM&&
+            Instant.ofEpochMilli(it.openedAt).atZone(ist).toLocalDate()==today&&it.outcome!=TradeCallOutcome.INVALID}
+    }
     fun lastSavedDualSummary()=lastDualSummary ?: loadLastDualFromDisk()
     fun lastPressureScanAt()=prefs.lastPressureScanAt()
     fun markPressureScanAt(value:Long=System.currentTimeMillis())=prefs.setLastPressureScanAt(value)
@@ -796,13 +805,14 @@ class GlobalEdgeAITraderRepository(context:Context){
         return raw.takeIf{it.isFinite()}?:0.0
     }
 
-    private fun candleOutcome(call:TradeCallRecord,candles:List<Candle>):Pair<TradeCallOutcome,Double>?{
+    private fun candleOutcome(call:TradeCallRecord,candles:List<Candle>,targetOverride:Double?=null):Pair<TradeCallOutcome,Double>?{
+        val target=(targetOverride?:call.targetPrice).takeIf{it.isFinite()&&it>0.0}?:call.targetPrice
         for(c in candles.sortedBy{it.epochSeconds}){
-            val targetHit=if(call.direction==TradeDirection.LONG)c.high>=call.targetPrice else c.low<=call.targetPrice
+            val targetHit=if(call.direction==TradeDirection.LONG)c.high>=target else c.low<=target
             val stopHit=if(call.direction==TradeDirection.LONG)c.low<=call.stopPrice else c.high>=call.stopPrice
-            if(targetHit&&stopHit)return TradeCallOutcome.LOSS to call.stopPrice // conservative when order inside one 5-min candle is unknowable
+            if(targetHit&&stopHit)return TradeCallOutcome.LOSS to call.stopPrice
             if(stopHit)return TradeCallOutcome.LOSS to call.stopPrice
-            if(targetHit)return TradeCallOutcome.WIN to call.targetPrice
+            if(targetHit)return TradeCallOutcome.WIN to target
         }
         return null
     }
@@ -836,14 +846,16 @@ class GlobalEdgeAITraderRepository(context:Context){
                 groww.getHistoricalCandles(token,call.symbol,startZ.format(dateTimeFmt),endZ.format(dateTimeFmt),"5minute")
             }.getOrNull().also{candleCache[cacheKey]=it}
 
-            var outcome=candles?.let{candleOutcome(call,it)}
             val q=quoteCache.getOrPut(call.symbol){runCatching{groww.getQuote(token,call.symbol)}.getOrNull()}
+            val targetForCall=if(call.engine==TradeCallEngine.UPPER_CIRCUIT&&call.bucket==TradeCallBucket.THREE_PM&&today==targetDate&&
+                q?.upperCircuit?.let{it.isFinite()&&it>0.0}==true)q!!.upperCircuit else call.targetPrice
+            var outcome=candles?.let{candleOutcome(call,it,targetForCall)}
             if(outcome==null&&today==targetDate&&q!=null&&q.lastPrice.isFinite()&&q.lastPrice>0.0){
-                val targetHit=if(call.direction==TradeDirection.LONG)q.lastPrice>=call.targetPrice else q.lastPrice<=call.targetPrice
+                val targetHit=if(call.direction==TradeDirection.LONG)q.lastPrice>=targetForCall else q.lastPrice<=targetForCall
                 val stopHit=if(call.direction==TradeDirection.LONG)q.lastPrice<=call.stopPrice else q.lastPrice>=call.stopPrice
                 outcome=when{
                     stopHit->TradeCallOutcome.LOSS to call.stopPrice
-                    targetHit->TradeCallOutcome.WIN to call.targetPrice
+                    targetHit->TradeCallOutcome.WIN to targetForCall
                     else->null
                 }
             }
@@ -876,7 +888,7 @@ class GlobalEdgeAITraderRepository(context:Context){
                 exitPrice=exit,
                 returnPct=ret,
                 closeReason=when(out){
-                    TradeCallOutcome.WIN->"Target reached"
+                    TradeCallOutcome.WIN->if(call.engine==TradeCallEngine.UPPER_CIRCUIT&&call.bucket==TradeCallBucket.THREE_PM)"Next-session upper circuit reached" else "Target reached"
                     TradeCallOutcome.LOSS->when{
                         forcedExpiry->"Target not reached by prediction horizon"
                         else->"Stop reached"
@@ -1242,6 +1254,16 @@ class GlobalEdgeAITraderRepository(context:Context){
         }
         directionalWinners.filter{it.first.score<72.0}.forEach{(setup,_)->recordRejectedStrategyShadow(setup,"BELOW_LIVE_THRESHOLD "+"%.1f".format(setup.score)+" < 72.0")}
         val researchPreview=directionalWinners.take(100)
+        val sessionClosed=closed.filter{r->
+            runCatching{Instant.ofEpochMilli(r.openedAt).atZone(ist).toLocalDate()==date}.getOrDefault(false)
+        }
+        val scoredSessionClosed=sessionClosed.filter{it.status==StrategyRecommendationStatus.WIN||it.status==StrategyRecommendationStatus.LOSS}
+        val sessionColdStrategies=scoredSessionClosed.groupBy{it.setup.strategyId}.mapNotNull{(id,rows)->
+            val wins=rows.count{it.status==StrategyRecommendationStatus.WIN}
+            val avg=if(rows.isEmpty())0.0 else rows.map{it.returnPct}.average()
+            id.takeIf{AutomationPolicy.strategySessionCold(rows.size,wins,avg)}
+        }.toSet()
+        val usedSessionSymbols=(surviving.map{it.setup.symbol}+sessionClosed.map{it.setup.symbol}).toMutableSet()
         val existingKeys=surviving.map{"${it.setup.symbol}|${it.setup.direction.name}"}.toMutableSet();val newlyOpened=mutableListOf<StrategySetup>()
         var challengerOpened=0
         var challengerPublished=0
@@ -1249,6 +1271,7 @@ class GlobalEdgeAITraderRepository(context:Context){
         var championPublished=0
         var probationBlocked=0
         var suspendedBlocked=0
+        var churnBlocked=0
         var liveExecutionRejected=0
         // No arbitrary publication cap: every score-qualified candidate that passes hard
         // execution/risk/governance gates may become visible in LIVE. Manual PLACE ORDER is still required.
@@ -1262,6 +1285,17 @@ class GlobalEdgeAITraderRepository(context:Context){
             }
             for((setup,q) in confirmedTop){
                 val status=governance[setup.strategyId]?.status?:StrategyStatus.CHALLENGER
+                if(setup.strategyId in sessionColdStrategies){
+                    probationBlocked++
+                    recordRejectedStrategyShadow(setup,"SESSION_COLD_PROBATION")
+                    if(status==StrategyStatus.CHALLENGER)openChallengerShadow(setup)
+                    continue
+                }
+                if(setup.symbol in usedSessionSymbols){
+                    churnBlocked++
+                    recordRejectedStrategyShadow(setup,"SESSION_SYMBOL_CHURN_BLOCK")
+                    continue
+                }
                 if(!ExecutionQuality.executableQuote(q)){
                     liveExecutionRejected++
                     recordRejectedStrategyShadow(setup,"LIVE_EXECUTION_GATE")
@@ -1283,7 +1317,7 @@ class GlobalEdgeAITraderRepository(context:Context){
                 val liveSetup=setup.copy(evidence=setup.evidence+" • "+maturityNote)
                 val sp=spreadPct(q);val id="${date}|$key|${setup.strategyId}"
                 surviving+=StrategyRecommendation(id,liveSetup,System.currentTimeMillis(),System.currentTimeMillis(),q.lastPrice,tradedValue=q.volume*q.lastPrice,volume=q.volume,spreadPct=sp)
-                existingKeys+=key;newlyOpened+=liveSetup
+                existingKeys+=key;usedSessionSymbols+=setup.symbol;newlyOpened+=liveSetup
                 when(status){
                     StrategyStatus.CHALLENGER->challengerPublished++
                     StrategyStatus.ACTIVE->activePublished++
@@ -1306,7 +1340,7 @@ class GlobalEdgeAITraderRepository(context:Context){
         val rejectedAfter=prefs.loadRejectedShadows(2500).size;val rejectedAdded=(rejectedAfter-rejectedBefore).coerceAtLeast(0)
         val champions=perfs.count{it.status==StrategyStatus.CHAMPION};val suspended=perfs.count{it.status==StrategyStatus.SUSPENDED}
         val summary=StrategyTournamentSummary(System.currentTimeMillis(),cash.size,active.size,enriched,researchPreview.map{it.first},active,perfs,bundle.version,
-            (if(challengerOnly)"SHADOW RUN • " else "")+"FULL NSE ${cash.size} • OHLC all • entry-prefilter ${stage1.size} • deep ${selected.size} • queued ${deferred} • ${active.size} rules • HB 100/50/50 • ${enriched} matched+quoted • ${quoteRejected} liquidity rejects • ${historyFailed} history failures • ${candleShort} short histories • ${rulesMatched} rule matches • HB cautions ${handbookCautions} • ${confirmedTop.size} score>=72 • ${liveExecutionRejected} execution rejects • ${probationBlocked} probation blocked • ${suspendedBlocked} suspended blocked • no publication cap • ${surviving.size} LIVE • ${newlyOpened.size} new [C ${challengerPublished} / A ${activePublished} / CH ${championPublished}] • challenger shadows +$challengerOpened • CHAMP ${champions} • SUSP ${suspended} • rejected+journal ${rejectedAdded}",
+            (if(challengerOnly)"SHADOW RUN • " else "")+"FULL NSE ${cash.size} • OHLC all • entry-prefilter ${stage1.size} • deep ${selected.size} • queued ${deferred} • ${active.size} rules • HB 100/50/50 • ${enriched} matched+quoted • ${quoteRejected} liquidity rejects • ${historyFailed} history failures • ${candleShort} short histories • ${rulesMatched} rule matches • HB cautions ${handbookCautions} • ${confirmedTop.size} score>=72 • ${liveExecutionRejected} execution rejects • ${probationBlocked} probation/session-cold blocked • ${suspendedBlocked} suspended blocked • ${churnBlocked} same-session churn blocked • no publication cap • ${surviving.size} LIVE • ${newlyOpened.size} new [C ${challengerPublished} / A ${activePublished} / CH ${championPublished}] • challenger shadows +$challengerOpened • CHAMP ${champions} • SUSP ${suspended} • rejected+journal ${rejectedAdded}",
             insights,rejectedAfter,HandbookSynergyEngine.VERSION)
         DiagnosticLog.log(appContext,"STRATEGY","${summary.message}")
         prefs.saveStrategySummary(summary);prefs.clearStrategyError();summary
@@ -1482,7 +1516,7 @@ class GlobalEdgeAITraderRepository(context:Context){
         val now=ZonedDateTime.now(ist)
         val time=now.toLocalTime()
         val session=marketSessionInfo(now)
-        if(!session.isOpen||time<LocalTime.of(15,15)||time>LocalTime.of(15,30))return@withLock emptyList()
+        if(!session.isOpen||time<LocalTime.of(15,10)||time>LocalTime.of(15,30))return@withLock emptyList()
         val today=now.toLocalDate()
         val already=prefs.loadTradeCalls(1500).any{
             it.engine==TradeCallEngine.UPPER_CIRCUIT&&it.bucket==TradeCallBucket.THREE_PM&&it.outcome==TradeCallOutcome.OPEN&&

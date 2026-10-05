@@ -41,6 +41,14 @@ private fun CompactHeader(title:String,state:UiState,lastUpdated:Long=0L,onRefre
             val multify=if(state.multifyListenerEnabled)"Multify ON" else "Multify OFF"
             val learning=if(state.settings.learningEnabled)"Learning ON" else "Learning OFF"
             Text("System • Groww ${state.growwApiHealth.status} • $multify • $learning",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            val hbAgeMs=if(state.scannerHeartbeatAt>0L)(System.currentTimeMillis()-state.scannerHeartbeatAt).coerceAtLeast(0L) else Long.MAX_VALUE
+            val hbFresh=hbAgeMs<=3L*60_000L
+            val hbText=when{
+                state.scannerHeartbeatAt<=0L->"Scanner STARTING • no heartbeat yet"
+                hbFresh->"Scanner ACTIVE • heartbeat ${(hbAgeMs/1000L).coerceAtLeast(0)}s ago"
+                else->"Scanner STALE • heartbeat ${hbAgeMs/60_000L}m ago • keep background/auto-start allowed"
+            }
+            Text(hbText,style=MaterialTheme.typography.labelSmall,color=if(!hbFresh&&state.marketSession.isOpen)MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -213,7 +221,7 @@ fun UpperCircuitCompactScreen(state:UiState,vm:MainViewModel,padding:PaddingValu
         if(state.marketSession.isOpen&&view!=UcCompactView.LIVE&&live.isNotEmpty())view=UcCompactView.LIVE
     }
     LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal=14.dp),verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(top=12.dp,bottom=24.dp)){
-        item{CompactHeader("Upper Circuit",state,state.dualSummary?.uc?.completedAt?:0L,vm::runScan,"24h NEXT SESSION research • LIVE 09:15–15:30 • 3 PM final list")}
+        item{CompactHeader("Upper Circuit",state,state.dualSummary?.uc?.completedAt?:0L,vm::runScan,"24h NEXT SESSION research • LIVE 09:15–15:30 • 3 PM priority 15:10–15:30")}
         if(ucMessage.isNotBlank())item{Text("Engine • $ucMessage",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
         item{
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(3.dp)){
@@ -257,7 +265,7 @@ fun UpperCircuitCompactScreen(state:UiState,vm:MainViewModel,padding:PaddingValu
                 if(threePmCalls.isEmpty())item{EmptyState("No qualified 3 PM list yet","The first non-empty UC candidate scan from 15:00–15:30 IST freezes the final next-session 3 PM list, independently of the LIVE gate.")}
                 else items(threePmCalls.take(50),key={it.id}){r->
                     TradeCard(r.symbol,"3 PM • NEXT-DAY PRE-UC",r.score,tradeCallPlan(r),r.detail,
-                        "LONG ONLY • buy window 15:00–15:30 • predicts UC attempt on ${r.targetSessionDate} • tap MODEL score to place manually",orderable=true,vm=vm)
+                        "LONG ONLY • buy window 15:10–15:30 • predicts UC attempt on ${r.targetSessionDate} • tap MODEL score to place manually",orderable=true,vm=vm)
                 }
             }
             UcCompactView.CLOSED->{
