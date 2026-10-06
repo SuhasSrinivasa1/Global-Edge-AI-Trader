@@ -285,6 +285,23 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
     fun runReplay(symbol:String,days:Long=30)=viewModelScope.launch{_state.value=_state.value.copy(busy=true,status="Replaying $symbol…",error=null);runCatching{repo.replay(symbol,days)}.onSuccess{_state.value=_state.value.copy(busy=false,replayResult=it,status="Replay complete")}.onFailure{_state.value=_state.value.copy(busy=false,error=it.message,status="Replay failed")}}
     fun refreshNews()=viewModelScope.launch{_state.value=_state.value.copy(busy=true,status="Loading NSE/BSE news…",error=null);runCatching{repo.refreshNews()}.onSuccess{_state.value=_state.value.copy(busy=false,newsItems=it,status="Loaded ${it.size} exchange updates")}.onFailure{_state.value=_state.value.copy(busy=false,error=it.message,status="News refresh failed")}}
     fun runLearningNow()=viewModelScope.launch{_state.value=_state.value.copy(busy=true,status="Running autonomous learning pass…",error=null);runCatching{repo.runAutonomousLearningPass(force=true)}.onSuccess{msg->_state.value=_state.value.copy(busy=false,accuracies=repo.accuracies(),strategyMetrics=repo.strategyMetrics(),status=msg);reliabilityRefresh(error=null)}.onFailure{_state.value=_state.value.copy(busy=false,error=it.message)}}
+    fun submitManualMultifySignal(symbol:String,eventType:MultifyEventType,signalPrice:Double,onResult:(Boolean,String)->Unit)=viewModelScope.launch{
+        _state.value=_state.value.copy(busy=true,status="Processing manual Multify ${eventType.name.replace('_',' ')}…",error=null)
+        runCatching{repo.submitManualMultifyEvent(symbol,eventType,signalPrice)}.onSuccess{decision->
+            val message=decision?.let{"Manual ${it.eventType.name.replace('_',' ')} processed • ${it.tier} ${it.direction?.name.orEmpty()} • ${it.symbol}"}?:"Manual event processed"
+            _state.value=_state.value.copy(
+                busy=false,status=message,error=null,multifyEvents=repo.multifyEvents(),multifyDashboard=repo.multifyDashboard(),
+                multifyShadowTrades=repo.multifyShadowTrades(),multifyDecisions=repo.multifyDecisions(),multifyProfiles=repo.multifyProfiles(),
+                brokerOrders=repo.brokerOrders()
+            )
+            onResult(true,message)
+        }.onFailure{t->
+            val message=t.message.orEmpty().ifBlank{"Manual Multify event failed"}
+            _state.value=_state.value.copy(busy=false,status="Manual Multify event not processed",error=message,multifyEvents=repo.multifyEvents(),brokerOrders=repo.brokerOrders())
+            onResult(false,message)
+        }
+    }
+
     fun replayMultifyNow()=viewModelScope.launch{
         _state.value=_state.value.copy(busy=true,status="Replaying captured Multify events…",error=null)
         runCatching{repo.replayMultifyEvents(80)}.onSuccess{n->
