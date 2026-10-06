@@ -127,19 +127,26 @@ object MultifyNotificationParser {
     }
 
     private fun parseSymbol(upper:String,direction:String):String{
-        val candidates=mutableListOf<String>()
-        fun add(re:Regex){re.find(upper)?.groupValues?.getOrNull(1)?.let(candidates::add)}
-        if(direction=="BUY")add(Regex("\\b(?:BUY|LONG|ENTRY\\s+LONG|GO\\s+LONG|BOUGHT)\\b\\s*[:=\\-]?\\s*(?:NSE[:\\s-]*)?([A-Z][A-Z0-9&.\\-]{1,19})"))
-        if(direction=="SELL")add(Regex("\\b(?:SELL|SHORT|ENTRY\\s+SHORT|GO\\s+SHORT|SOLD)\\b\\s*[:=\\-]?\\s*(?:NSE[:\\s-]*)?([A-Z][A-Z0-9&.\\-]{1,19})"))
-        add(Regex("\\bNSE[:\\s-]+([A-Z][A-Z0-9&.\\-]{1,19})\\b"))
-        add(Regex("\\b(?:STOCK|SYMBOL|SCRIP|TICKER)\\s*[:=\\-]\\s*([A-Z][A-Z0-9&.\\-]{1,19})\\b"))
-        add(Regex("[#$]([A-Z][A-Z0-9&.\\-]{1,19})\\b"))
-        add(Regex("\\b([A-Z][A-Z0-9&.\\-]{1,19})\\b\\s*(?:@|\\bAT\\b|\\bCMP\\b|₹)"))
-        if(direction=="EXIT")add(Regex("\\b(?:EXIT|CLOSE|CLOSED|SQUARE\\s*OFF)\\b\\s*[:=\\-]?\\s*(?:NSE[:\\s-]*)?([A-Z][A-Z0-9&.\\-]{1,19})\\b"))
-        add(Regex("\\b([A-Z][A-Z0-9&.\\-]{1,19})\\b\\s*[:=\\-]?\\s*\\b(?:BUY|SELL|LONG|SHORT|EXIT|CLOSE)\\b"))
-        return candidates.map{it.trim('.', '-', ' ')}.firstOrNull{
-            it.length in 2..20&&it !in BLOCKED&&!it.endsWith("CE")&&!it.endsWith("PE")&&!it.all(Char::isDigit)
-        }.orEmpty()
+        fun valid(v:String?):String?{
+            val x=v.orEmpty().trim('.', '-', ' ')
+            return x.takeIf{it.length in 2..20&&it !in BLOCKED&&!it.endsWith("CE")&&!it.endsWith("PE")&&!it.all(Char::isDigit)}
+        }
+        val directional=when(direction){
+            "BUY"->Regex("\\b(?:BUY|LONG|ENTRY\\s+LONG|GO\\s+LONG|BOUGHT)\\b\\s*[:=\\-]?\\s*(?:NSE[:\\s-]*)?([A-Z][A-Z0-9&.\\-]{1,19})")
+            "SELL"->Regex("\\b(?:SELL|SHORT|ENTRY\\s+SHORT|GO\\s+SHORT|SOLD)\\b\\s*[:=\\-]?\\s*(?:NSE[:\\s-]*)?([A-Z][A-Z0-9&.\\-]{1,19})")
+            "EXIT"->Regex("\\b(?:EXIT|CLOSE|CLOSED|SQUARE\\s*OFF)\\b\\s*[:=\\-]?\\s*(?:NSE[:\\s-]*)?([A-Z][A-Z0-9&.\\-]{1,19})\\b")
+            else->null
+        }?.find(upper)?.groupValues?.getOrNull(1)?.let(::valid)
+        if(directional!=null)return directional
+
+        val fallbacks=listOf(
+            Regex("\\bNSE[:\\s-]+([A-Z][A-Z0-9&.\\-]{1,19})\\b"),
+            Regex("\\b(?:STOCK|SYMBOL|SCRIP|TICKER)\\s*[:=\\-]\\s*([A-Z][A-Z0-9&.\\-]{1,19})\\b"),
+            Regex("[#$]([A-Z][A-Z0-9&.\\-]{1,19})\\b"),
+            Regex("\\b([A-Z][A-Z0-9&.\\-]{1,19})\\b\\s*(?:@|\\bAT\\b|\\bCMP\\b|₹)"),
+            Regex("\\b([A-Z][A-Z0-9&.\\-]{1,19})\\b\\s*[:=\\-]?\\s*\\b(?:BUY|SELL|LONG|SHORT|EXIT|CLOSE)\\b")
+        )
+        return fallbacks.asSequence().mapNotNull{it.find(upper)?.groupValues?.getOrNull(1)?.let(::valid)}.firstOrNull().orEmpty()
     }
 
     private fun classifyInstrument(upper:String,symbol:String):MultifyInstrumentClass{
