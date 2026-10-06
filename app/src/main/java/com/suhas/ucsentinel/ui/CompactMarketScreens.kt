@@ -349,17 +349,30 @@ fun StrategiesCompactScreen(state:UiState,vm:MainViewModel,padding:PaddingValues
     LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal=14.dp),verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(top=12.dp,bottom=24.dp)){
         item{CompactHeader("Trading Strategies",state,state.lastStrategyScanAt,vm::refreshTradingStrategies)}
         item{
-            val band=bestScoreBand(state.strategyClosed)
-            if(band==null){
-                Text("Best model-score band • collecting closed results",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            }else{
-                ElevatedCard(Modifier.fillMaxWidth()){
-                    Column(Modifier.padding(horizontal=12.dp,vertical=9.dp),verticalArrangement=Arrangement.spacedBy(2.dp)){
-                        Text("BEST MODEL-SCORE BAND • ${band.low}–${band.high}%",style=MaterialTheme.typography.labelMedium,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary)
-                        Text("${band.wins}/${band.samples} wins • ${"%.1f".format(band.accuracy)}% observed hit rate • avg ${"%+.2f".format(band.avgReturn)}% return${if(band.established)"" else " • early sample"}",
-                            style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Dynamic 5-point band from closed strategy calls • MODEL score is not a probability.",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+            val summary=state.strategyTournamentSummary
+            val perfs=summary?.performances.orEmpty()
+            val champions=perfs.filter{it.status==StrategyStatus.CHAMPION}
+            val qualified=perfs.filter{it.status==StrategyStatus.QUALIFIED}
+            val production=champions+qualified
+            val weightedN=production.sumOf{it.observations}
+            val weightedWins=production.sumOf{it.wins}
+            val hit=if(weightedN>0)weightedWins*100.0/weightedN else 0.0
+            val recentRows=production.filter{it.observations>0}
+            val recent=if(recentRows.isEmpty())0.0 else recentRows.map{it.recentAccuracyPct}.average()
+            val expectancy=if(recentRows.isEmpty())0.0 else recentRows.map{it.netExpectancyR}.average()
+            val sessions=production.maxOfOrNull{it.distinctSessions}?:0
+            ElevatedCard(Modifier.fillMaxWidth()){
+                Column(Modifier.padding(horizontal=12.dp,vertical=9.dp),verticalArrangement=Arrangement.spacedBy(3.dp)){
+                    Text("PRODUCTION GOVERNANCE V2",style=MaterialTheme.typography.labelMedium,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary)
+                    Text("Champion ${champions.size} • Qualified ${qualified.size} • Challenger/Probation are SHADOW ONLY",
+                        style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        if(weightedN>0)"Comparable LIVE evidence • $weightedWins/$weightedN target-before-stop • ${"%.1f".format(hit)}% hit • recent ${"%.1f".format(recent)}% • exp ${"%+.2f".format(expectancy)}R • max context days $sessions"
+                        else "Collecting comparable target/stop/EOD evidence • no production strategy is promoted intraday.",
+                        style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text("LIVE and Shadow accuracy are stored separately • roster is frozen before the session • MODEL % is calibrated target-before-stop probability, not a raw rule score.",
+                        style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.tertiary)
                 }
             }
         }
@@ -385,15 +398,15 @@ fun StrategiesCompactScreen(state:UiState,vm:MainViewModel,padding:PaddingValues
                 ElevatedCard(Modifier.fillMaxWidth()){
                     Column(Modifier.padding(horizontal=12.dp,vertical=10.dp),verticalArrangement=Arrangement.spacedBy(4.dp)){
                         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically){
-                            Text("CHAMPION RESEARCH • PLAYBOOK SYNERGY",style=MaterialTheme.typography.labelMedium,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary)
+                            Text("CONTEXTUAL CHAMPION / QUALIFIED ROSTER",style=MaterialTheme.typography.labelMedium,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary)
                             val champ=research.performances.count{it.status==StrategyStatus.CHAMPION}
                             val susp=research.performances.count{it.status==StrategyStatus.SUSPENDED}
                             Text("C $champ • S $susp",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Text("Research library • 100 candle/price-action recognizers • strategy families + parameter variants • shadow challengers",
+                        Text("Frozen OPEN/MID/LATE × LONG/SHORT × regime governance • shadow exploration is never orderable",
                             style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         if(research.championInsights.isEmpty()){
-                            Text("Collecting chronological closed calls for holdout + walk-forward Champion evidence.",
+                            Text("Collecting distinct-session target/stop/EOD evidence for contextual Champion/Qualified promotion.",
                                 style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         }else research.championInsights.take(6).forEach{line->
                             Text(line,style=MaterialTheme.typography.labelSmall,color=if(line.startsWith("DECAY"))MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -418,11 +431,11 @@ fun StrategiesCompactScreen(state:UiState,vm:MainViewModel,padding:PaddingValues
             else{
                 if(visibleLive.isNotEmpty())items(visibleLive,key={it.id}){r->
                     val s=r.setup
-                    TradeCard(s.symbol,"${s.direction.name} • ${s.strategyName}",s.score,strategyPlan(s),s.evidence,"LIVE • opened ${formatIstTimestamp(r.openedAt)} • spread ${"%.2f".format(r.spreadPct)}% • tap MODEL score to place manually",orderable=true,vm=vm)
+                    TradeCard(s.symbol,"${s.direction.name} • ${s.strategyName}",s.score,strategyPlan(s),s.evidence,"LIVE • calibrated ${"%.1f".format(s.calibratedProbabilityPct)}% target-before-stop • exp ${"%+.2f".format(s.expectedR)}R • opened ${formatIstTimestamp(r.openedAt)} • spread ${"%.2f".format(r.spreadPct)}% • tap MODEL score to place manually",orderable=true,vm=vm)
                 }
                 if(visibleDeveloping.isNotEmpty()){
                     item{Text("DEVELOPING ${visibleDeveloping.take(12).size}",style=MaterialTheme.typography.labelMedium,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.tertiary)}
-                    items(visibleDeveloping.take(12),key={"dev-${it.symbol}-${it.direction}"}){s->TradeCard(s.symbol,"DEVELOPING • ${s.direction.name} • ${s.strategyName}",s.score,strategyPlan(s),s.evidence,"Research signal • not counted as a LIVE call until the 72+ execution/governance gate clears")}
+                    items(visibleDeveloping.take(12),key={"dev-${it.symbol}-${it.direction}"}){s->TradeCard(s.symbol,"DEVELOPING • ${s.direction.name} • ${s.strategyName}",s.score,strategyPlan(s),s.evidence,"Research signal • shadow/developing only unless the frozen contextual roster is QUALIFIED or CHAMPION and expectancy/execution gates clear")}
                 }
                 if(visibleWatch.isNotEmpty()){
                     item{Text("WATCH ${visibleWatch.take(5).size}",style=MaterialTheme.typography.labelMedium,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.onSurfaceVariant)}
