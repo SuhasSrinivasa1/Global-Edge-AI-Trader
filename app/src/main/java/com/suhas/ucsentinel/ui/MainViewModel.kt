@@ -31,6 +31,7 @@ data class UiState(
     val decisionSnapshots:List<DecisionSnapshot> = emptyList(),val pointInTimeEvidence:List<PointInTimeEvidence> = emptyList(),
     val evidenceFabric:EvidenceFabricSummary?=null,
     val growwApiHealth:GrowwApiHealthSnapshot=GrowwApiHealthSnapshot(),
+    val learningVaultConfigured:Boolean=false,val learningVaultLastBackupAt:Long=0L,val learningVaultLastRestoreAt:Long=0L,
     val multifyEvents:List<MultifyEvent> = emptyList(),val multifyListenerEnabled:Boolean=false,
     val multifyCandidatePackage:String="",val multifyTrustedPackage:String="",
     val multifyDashboard:MultifyDashboard=MultifyDashboard(),val multifyShadowTrades:List<MultifyShadowTrade> = emptyList(),
@@ -110,6 +111,8 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
             strategyTournamentSummary=repo.strategyTournamentSummary(),lastStrategyScanAt=repo.lastStrategyScanAt(),lastStrategyAttemptAt=repo.lastStrategyAttemptAt(),lastStrategyErrorAt=repo.lastStrategyErrorAt(),lastStrategyError=repo.lastStrategyError(),lastStrategyCatalogRefreshAt=repo.lastStrategyCatalogRefreshAt(),strategyCatalogVersion=repo.strategyCatalogVersion(),
             strategyLive=repo.strategyLiveRecommendations(),strategyClosed=repo.strategyClosedRecommendations(),globalClosed=repo.globalLeadClosedRecommendations(),tradeCalls=repo.tradeCalls(),tradeAutopsies=repo.tradeAutopsies(),
             challengerShadows=repo.challengerShadows(),brokerOrders=repo.brokerOrders(),decisionSnapshots=repo.decisionSnapshots(),pointInTimeEvidence=repo.pointInTimeEvidence(),evidenceFabric=repo.evidenceFabricSummary(),growwApiHealth=repo.growwApiHealth(),
+            learningVaultConfigured=repo.learningVaultConfigured(),learningVaultLastBackupAt=repo.learningVaultLastBackupAt(),learningVaultLastRestoreAt=repo.learningVaultLastRestoreAt(),
+            learningVaultConfigured=repo.learningVaultConfigured(),learningVaultLastBackupAt=repo.learningVaultLastBackupAt(),learningVaultLastRestoreAt=repo.learningVaultLastRestoreAt(),
             multifyEvents=repo.multifyEvents(),multifyListenerEnabled=repo.multifyListenerEnabled(),multifyCandidatePackage=repo.multifyCandidatePackage(),multifyTrustedPackage=repo.multifyTrustedPackage(),multifyDashboard=repo.multifyDashboard(),multifyShadowTrades=repo.multifyShadowTrades(),
             multifyDecisions=repo.multifyDecisions(),multifyProfiles=repo.multifyProfiles())
     }
@@ -126,6 +129,28 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
             challengerShadows=repo.challengerShadows(),brokerOrders=repo.brokerOrders(),decisionSnapshots=repo.decisionSnapshots(),pointInTimeEvidence=repo.pointInTimeEvidence(),evidenceFabric=repo.evidenceFabricSummary(),growwApiHealth=repo.growwApiHealth(),
             multifyEvents=repo.multifyEvents(),multifyListenerEnabled=repo.multifyListenerEnabled(),multifyCandidatePackage=repo.multifyCandidatePackage(),multifyTrustedPackage=repo.multifyTrustedPackage(),multifyDashboard=repo.multifyDashboard(),multifyShadowTrades=repo.multifyShadowTrades(),
             multifyDecisions=repo.multifyDecisions(),multifyProfiles=repo.multifyProfiles())
+    }
+
+    fun configureLearningVault(uriText:String)=viewModelScope.launch{
+        _state.value=_state.value.copy(busy=true,status="Creating persistent learning vault…",error=null)
+        runCatching{repo.configureLearningVault(uriText)}.onSuccess{n->
+            reliabilityRefresh(status="Persistent learning vault active • $n state entries backed up",error=null)
+            _state.value=_state.value.copy(busy=false)
+        }.onFailure{t->_state.value=_state.value.copy(busy=false,status="Learning vault setup failed",error=t.message)}
+    }
+    fun restoreLearningVault(uriText:String)=viewModelScope.launch{
+        _state.value=_state.value.copy(busy=true,status="Restoring persistent learning vault…",error=null)
+        runCatching{repo.restoreLearningVault(uriText)}.onSuccess{n->
+            reliabilityRefresh(status="Learning restored • $n state entries • REAL orders remain OFF",error=null)
+            _state.value=_state.value.copy(busy=false)
+        }.onFailure{t->_state.value=_state.value.copy(busy=false,status="Learning restore failed",error=t.message)}
+    }
+    fun backupLearningVaultNow()=viewModelScope.launch{
+        _state.value=_state.value.copy(busy=true,status="Backing up learning vault…",error=null)
+        runCatching{repo.backupLearningVaultNow()}.onSuccess{n->
+            reliabilityRefresh(status="Learning vault backed up • $n state entries",error=null)
+            _state.value=_state.value.copy(busy=false)
+        }.onFailure{t->_state.value=_state.value.copy(busy=false,status="Learning backup failed",error=t.message)}
     }
 
     fun updateCredentials(c:Credentials){_state.value=_state.value.copy(credentials=c)}
