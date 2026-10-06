@@ -2,7 +2,7 @@ package com.suhas.globaledgeai.domain.model
 
 enum class EvidenceKind { FUNDAMENTAL, ANALYST, COMPANY_EVENT, MACRO_EVENT, SECTOR, EXECUTION }
 enum class EventRiskLevel { LOW, MEDIUM, HIGH }
-enum class ChallengerShadowOutcome { PENDING, WIN, LOSS, UNRESOLVED_DATA }
+enum class ChallengerShadowOutcome { PENDING, WIN, LOSS, AMBIGUOUS, UNRESOLVED_DATA }
 
 data class PointInTimeEvidence(
     val id:String,
@@ -62,7 +62,13 @@ data class ChallengerShadowRecord(
     val resolvedAt:Long=0L,
     val horizonPrice:Double=0.0,
     val returnPct:Double=0.0,
-    val note:String=""
+    val note:String="",
+    val targetPct:Double=0.0,
+    val stopPct:Double=0.0,
+    val sessionBand:String="",
+    val regime:String="",
+    val componentStrategyIds:List<String> = emptyList(),
+    val modelVersion:String="LEGACY-V1"
 )
 
 data class BrokerFillRecord(
