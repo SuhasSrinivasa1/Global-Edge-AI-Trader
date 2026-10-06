@@ -1,6 +1,7 @@
 package com.suhas.globaledgeai.data.repository
 
 import android.content.Context
+import android.net.Uri
 import com.suhas.globaledgeai.data.local.*
 import com.suhas.globaledgeai.data.remote.*
 import com.suhas.globaledgeai.domain.engine.*
@@ -39,6 +40,7 @@ class GlobalEdgeAITraderRepository(context:Context){
     private val appContext=context.applicationContext
     private val secureStore=SecureCredentialStore(context)
     private val prefs=AppPreferences(context)
+    private val learningVault=PersistentLearningVault(appContext)
     private val groww=GrowwClient()
     private val news=ExchangeNewsClient()
     private val nseMaster=NseSecurityMasterClient()
@@ -114,6 +116,32 @@ class GlobalEdgeAITraderRepository(context:Context){
         ScannerSection.UC_CONTINUATION to prefs.sectionAccuracy(ScannerSection.UC_CONTINUATION,SignalEngine.MODEL_VERSION),
         ScannerSection.DEMAND_SQUEEZE to prefs.sectionAccuracy(ScannerSection.DEMAND_SQUEEZE,DemandSignalEngine.MODEL_VERSION)
     )
+    fun learningVaultConfigured()=learningVault.configured()
+    fun learningVaultLastBackupAt()=learningVault.lastBackupAt()
+    fun learningVaultLastRestoreAt()=learningVault.lastRestoreAt()
+    fun configureLearningVault(uriText:String):Int{
+        val count=learningVault.configure(Uri.parse(uriText))
+        DiagnosticLog.log(appContext,"LEARNING-VAULT","configured + initial backup • entries=$count")
+        return count
+    }
+    fun restoreLearningVault(uriText:String):Int{
+        val count=learningVault.restoreAndConfigure(Uri.parse(uriText))
+        newListingsCache=prefs.loadNewListings()
+        lastDualSummary=loadLastDualFromDisk()
+        strategyCatalog=null
+        globalMappings=null
+        DiagnosticLog.log(appContext,"LEARNING-VAULT","restored • entries=$count • live trading remains disarmed")
+        return count
+    }
+    fun backupLearningVaultNow():Int{
+        val count=learningVault.backupNow()
+        DiagnosticLog.log(appContext,"LEARNING-VAULT","manual backup • entries=$count")
+        return count
+    }
+    fun backupLearningVaultIfDue():Int=runCatching{learningVault.backupIfDue()}.onFailure{
+        DiagnosticLog.log(appContext,"LEARNING-VAULT","automatic backup failed",it)
+    }.getOrDefault(0)
+
     fun newListings()=newListingsCache
     fun listingFeedHealth()=prefs.listingFeedHealth()
     fun lastMarketDataSuccessAt()=prefs.lastMarketDataSuccessAt()
@@ -2131,6 +2159,7 @@ class GlobalEdgeAITraderRepository(context:Context){
         val msg="$mode • auth=$auth • UC calls ${wl(ucDone)} • Pressure calls ${wl(prDone)} • Strategies live=$live closed=${closed.size} champions=$champions • Global active=$globalLive calls ${wl(glDone)} • Multify ${multify.size}/$multifyEvaluated evaluated shadow=₹${"%+.0f".format(multifyDash.todayNet)}/${MULTIFY_DAILY_NET_TARGET.toInt()} • autopsies=${autopsies.size} loss-diagnostics=$lossesExplained • rejected-shadow=${rejected.size} missed-winners=$missed"
         prefs.setLastAutonomousLearningAt(now)
         DiagnosticLog.log(appContext,"LEARNING15M",msg)
+        backupLearningVaultIfDue()
         return msg
     }
 
