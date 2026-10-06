@@ -286,6 +286,12 @@ private fun Auth(state:UiState,vm:MainViewModel){
 private fun Settings(state:UiState,vm:MainViewModel){
     val ctx=LocalContext.current
     var logExportStatus by remember{mutableStateOf<String?>(null)}
+    val vaultCreator=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")){uri->
+        if(uri!=null)vm.configureLearningVault(uri.toString())
+    }
+    val vaultRestorer=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->
+        if(uri!=null)vm.restoreLearningVault(uri.toString())
+    }
     val centralizedExporter=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")){uri->
         if(uri!=null){
             runCatching{
@@ -329,6 +335,29 @@ private fun Settings(state:UiState,vm:MainViewModel){
         contentPadding=PaddingValues(bottom=28.dp)
     ){
         item{AppHeader("Settings","Global Edge AI Trader ${BuildConfig.VERSION_NAME} • coordinated engines • adaptive learning")}
+        item{
+            ElevatedCard(Modifier.fillMaxWidth()){
+                Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+                    Text("Persistent learning vault",style=MaterialTheme.typography.titleMedium)
+                    val backupLabel=if(state.learningVaultLastBackupAt>0L){
+                        java.time.Instant.ofEpochMilli(state.learningVaultLastBackupAt).atZone(java.time.ZoneId.of("Asia/Kolkata")).toLocalDateTime().toString().replace('T',' ')
+                    }else "never"
+                    Text(
+                        if(state.learningVaultConfigured) "ACTIVE • automatic snapshot about every 2 minutes while the scanner service is alive • last backup $backupLabel"
+                        else "NOT CONFIGURED • a normal Android uninstall will delete app-private learning unless you create this vault first.",
+                        style=MaterialTheme.typography.bodySmall,
+                        color=if(state.learningVaultConfigured)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    )
+                    Text("The vault keeps scanner/strategy/global learning, ledgers and Multify research state in a document outside the app sandbox. Groww credentials/tokens are excluded. Restoring never re-arms REAL Multify orders and exact LIVE-source trust must be confirmed again.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        Button(onClick={vaultCreator.launch("Global-Edge-Learning-Vault.json")},modifier=Modifier.weight(1f)){Text(if(state.learningVaultConfigured)"Replace vault" else "Create vault")}
+                        OutlinedButton(onClick=vm::backupLearningVaultNow,enabled=state.learningVaultConfigured&&!state.busy,modifier=Modifier.weight(1f)){Text("Backup now")}
+                    }
+                    OutlinedButton(onClick={vaultRestorer.launch(arrayOf("application/json","text/plain","application/octet-stream"))},modifier=Modifier.fillMaxWidth()){Text("Restore learning vault")}
+                    Text("After a full uninstall/reinstall, open Settings → Restore learning vault and select the same file once. ADB uninstall -k can preserve local data without needing restore.",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
         item{
             ElevatedCard(Modifier.fillMaxWidth()){
                 Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(5.dp)){
