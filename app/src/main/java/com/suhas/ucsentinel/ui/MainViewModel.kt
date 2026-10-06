@@ -112,7 +112,6 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
             strategyLive=repo.strategyLiveRecommendations(),strategyClosed=repo.strategyClosedRecommendations(),globalClosed=repo.globalLeadClosedRecommendations(),tradeCalls=repo.tradeCalls(),tradeAutopsies=repo.tradeAutopsies(),
             challengerShadows=repo.challengerShadows(),brokerOrders=repo.brokerOrders(),decisionSnapshots=repo.decisionSnapshots(),pointInTimeEvidence=repo.pointInTimeEvidence(),evidenceFabric=repo.evidenceFabricSummary(),growwApiHealth=repo.growwApiHealth(),
             learningVaultConfigured=repo.learningVaultConfigured(),learningVaultLastBackupAt=repo.learningVaultLastBackupAt(),learningVaultLastRestoreAt=repo.learningVaultLastRestoreAt(),
-            learningVaultConfigured=repo.learningVaultConfigured(),learningVaultLastBackupAt=repo.learningVaultLastBackupAt(),learningVaultLastRestoreAt=repo.learningVaultLastRestoreAt(),
             multifyEvents=repo.multifyEvents(),multifyListenerEnabled=repo.multifyListenerEnabled(),multifyCandidatePackage=repo.multifyCandidatePackage(),multifyTrustedPackage=repo.multifyTrustedPackage(),multifyDashboard=repo.multifyDashboard(),multifyShadowTrades=repo.multifyShadowTrades(),
             multifyDecisions=repo.multifyDecisions(),multifyProfiles=repo.multifyProfiles())
     }
@@ -127,6 +126,7 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
             strategyTournamentSummary=repo.strategyTournamentSummary(),lastStrategyScanAt=repo.lastStrategyScanAt(),lastStrategyAttemptAt=repo.lastStrategyAttemptAt(),lastStrategyErrorAt=repo.lastStrategyErrorAt(),lastStrategyError=repo.lastStrategyError(),lastStrategyCatalogRefreshAt=repo.lastStrategyCatalogRefreshAt(),strategyCatalogVersion=repo.strategyCatalogVersion(),
             strategyLive=repo.strategyLiveRecommendations(),strategyClosed=repo.strategyClosedRecommendations(),globalClosed=repo.globalLeadClosedRecommendations(),tradeCalls=repo.tradeCalls(),tradeAutopsies=repo.tradeAutopsies(),
             challengerShadows=repo.challengerShadows(),brokerOrders=repo.brokerOrders(),decisionSnapshots=repo.decisionSnapshots(),pointInTimeEvidence=repo.pointInTimeEvidence(),evidenceFabric=repo.evidenceFabricSummary(),growwApiHealth=repo.growwApiHealth(),
+            learningVaultConfigured=repo.learningVaultConfigured(),learningVaultLastBackupAt=repo.learningVaultLastBackupAt(),learningVaultLastRestoreAt=repo.learningVaultLastRestoreAt(),
             multifyEvents=repo.multifyEvents(),multifyListenerEnabled=repo.multifyListenerEnabled(),multifyCandidatePackage=repo.multifyCandidatePackage(),multifyTrustedPackage=repo.multifyTrustedPackage(),multifyDashboard=repo.multifyDashboard(),multifyShadowTrades=repo.multifyShadowTrades(),
             multifyDecisions=repo.multifyDecisions(),multifyProfiles=repo.multifyProfiles())
     }
