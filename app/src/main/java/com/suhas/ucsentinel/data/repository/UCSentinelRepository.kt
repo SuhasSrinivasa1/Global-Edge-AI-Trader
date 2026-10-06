@@ -173,6 +173,9 @@ class GlobalEdgeAITraderRepository(context:Context){
     fun scannerHeartbeatStatus()=prefs.scannerHeartbeatStatus()
     fun markScannerHeartbeat(status:String,at:Long=System.currentTimeMillis())=prefs.setScannerHeartbeat(at,status)
     fun scannerHeartbeatFresh(nowMs:Long=System.currentTimeMillis())=AutomationPolicy.serviceHeartbeatFresh(nowMs,prefs.scannerHeartbeatAt())
+    fun hasThreePmPrepToday():Boolean=prefs.threePmPrepDate()==LocalDate.now(ist).toString()&&prefs.threePmPrep(LocalDate.now(ist).toString()).isNotEmpty()
+    fun lastThreePmPrepAt():Long=prefs.lastThreePmPrepAt()
+
     fun hasThreePmUcToday():Boolean{
         val today=LocalDate.now(ist)
         return prefs.loadTradeCalls(1500).any{it.engine==TradeCallEngine.UPPER_CIRCUIT&&it.bucket==TradeCallBucket.THREE_PM&&
@@ -1720,10 +1723,28 @@ class GlobalEdgeAITraderRepository(context:Context){
         DualScanSummary(uc,demand,listings).also{summary->lastDualSummary=summary;lastDualScanAt=maxOf(uc.completedAt,demand.completedAt)}
     }
 
+    suspend fun prepareUpperCircuitThreePm(progress:suspend(String)->Unit={}):Int=scanMutex.withLock{
+        val now=ZonedDateTime.now(ist);val time=now.toLocalTime()
+        if(!marketSessionInfo(now).isOpen||time<LocalTime.of(14,45)||time>=LocalTime.of(15,10))return@withLock 0
+        require(ensureAutomationAuthentication()){"Groww authentication is required for 3 PM preparation"}
+        val token=accessToken();val settings=prefs.loadSettings()
+        val universe=if(instruments.cached().isEmpty())instruments.refresh() else instruments.cached()
+        val listings=if(newListingsCache.isEmpty())runCatching{refreshNewListings()}.getOrDefault(emptyList()) else newListingsCache
+        val symbols=universe.asSequence().filter{ExecutionQuality.eligibleInstrument(it)}.map{it.tradingSymbol}.distinct().toList()
+        progress("3 PM UC PREP: full-NSE ranking before the final window")
+        groww.prefetchOhlcSnapshot(token,symbols,progress)
+        val research=withUcEvidenceContext(
+            ucScanner.scan(token,universe,listings,settings,prefs.adaptivePrecisionMap(ScannerSection.UC_CONTINUATION,SignalEngine.MODEL_VERSION),progress,nextSessionMode=true,
+                rejectedShadow={c,reason->recordRejectedCandidateShadow(ScannerSection.UC_CONTINUATION,TradeCallBucket.THREE_PM,c,"PREP "+reason)})
+        )
+        val prep=research.candidates.sortedByDescending{it.score}.take(40)
+        prefs.saveThreePmPrep(now.toLocalDate().toString(),prep,System.currentTimeMillis())
+        DiagnosticLog.log(appContext,"UC-3PM-PREP","prepared "+prep.size+" candidates at "+now.toLocalTime())
+        prep.size
+    }
+
     suspend fun scanUpperCircuitThreePm(progress:suspend(String)->Unit={}):List<Candidate> = scanMutex.withLock{
-        val now=ZonedDateTime.now(ist)
-        val time=now.toLocalTime()
-        val session=marketSessionInfo(now)
+        val now=ZonedDateTime.now(ist);val time=now.toLocalTime();val session=marketSessionInfo(now)
         if(!session.isOpen||time<LocalTime.of(15,10)||time>LocalTime.of(15,30))return@withLock emptyList()
         val today=now.toLocalDate()
         val already=prefs.loadTradeCalls(1500).any{
@@ -1732,25 +1753,49 @@ class GlobalEdgeAITraderRepository(context:Context){
         }
         if(already)return@withLock emptyList()
         require(ensureAutomationAuthentication()){"Groww authentication is required for 3 PM UC prediction"}
-        val token=secureStore.accessToken()
-        val settings=prefs.loadSettings()
-        val universe=if(instruments.cached().isEmpty())instruments.refresh() else instruments.cached()
-        val listings=if(newListingsCache.isEmpty())runCatching{refreshNewListings()}.getOrDefault(emptyList()) else newListingsCache
-        val symbols=universe.asSequence().filter{ExecutionQuality.eligibleInstrument(it)}.map{it.tradingSymbol}.distinct().toList()
-        progress("3 PM UC: preparing full-NSE next-session snapshot")
-        groww.prefetchOhlcSnapshot(token,symbols,progress)
-        val research=withUcEvidenceContext(
-            ucScanner.scan(token,universe,listings,settings,prefs.adaptivePrecisionMap(ScannerSection.UC_CONTINUATION,SignalEngine.MODEL_VERSION),progress,nextSessionMode=true,
-                rejectedShadow={c,reason->recordRejectedCandidateShadow(ScannerSection.UC_CONTINUATION,TradeCallBucket.THREE_PM,c,reason)})
-        )
-        val picks=research.candidates.filter{"UC_LIVE" in it.activeStrategies}
-            .sortedWith(compareByDescending<Candidate>{it.score}.thenByDescending{it.buySellRatio}.thenByDescending{it.volumeRatio})
-            .take(settings.maxFinalCandidates.coerceIn(1,5))
+        val token=accessToken();val settings=prefs.loadSettings()
+        var prep=prefs.threePmPrep(today.toString())
+        // Emergency fallback only near the start of the window. Never launch a several-minute full-NSE scan
+        // in the final ten minutes where it can be killed before producing a list.
+        if(prep.isEmpty()&&time<=LocalTime.of(15,16)){
+            val universe=if(instruments.cached().isEmpty())instruments.refresh() else instruments.cached()
+            val listings=if(newListingsCache.isEmpty())runCatching{refreshNewListings()}.getOrDefault(emptyList()) else newListingsCache
+            val symbols=universe.asSequence().filter{ExecutionQuality.eligibleInstrument(it)}.map{it.tradingSymbol}.distinct().toList()
+            progress("3 PM UC: prep missing; one early-window recovery ranking")
+            groww.prefetchOhlcSnapshot(token,symbols,progress)
+            val research=withUcEvidenceContext(ucScanner.scan(token,universe,listings,settings,prefs.adaptivePrecisionMap(ScannerSection.UC_CONTINUATION,SignalEngine.MODEL_VERSION),progress,nextSessionMode=true,
+                rejectedShadow={c,reason->recordRejectedCandidateShadow(ScannerSection.UC_CONTINUATION,TradeCallBucket.THREE_PM,c,"RECOVERY "+reason)}))
+            prep=research.candidates.sortedByDescending{it.score}.take(40)
+            prefs.saveThreePmPrep(today.toString(),prep,System.currentTimeMillis())
+        }
+        if(prep.isEmpty()){
+            prefs.setLastNearCloseAutoScanAt(System.currentTimeMillis())
+            DiagnosticLog.log(appContext,"UC-3PM","fast confirmation had no prepared candidates; no full scan after 15:16")
+            return@withLock emptyList()
+        }
+
+        progress("3 PM UC: fast quote/depth confirmation of "+prep.size+" prepared names")
+        val confirmed=mutableListOf<Candidate>()
+        for(c in prep.take(20)){
+            val q=runCatching{groww.getQuote(token,c.symbol)}.getOrNull()?:continue
+            if(!ExecutionQuality.executableQuote(q))continue
+            val ratio=if(q.totalSellQuantity<=0L&&q.totalBuyQuantity>0L)12.0 else if(q.totalSellQuantity>0L)q.totalBuyQuantity.toDouble()/q.totalSellQuantity else 1.0
+            val distance=if(q.upperCircuit>q.lastPrice&&q.lastPrice>0.0)(q.upperCircuit/q.lastPrice-1.0)*100.0 else 99.0
+            val confirmation=(if(ratio>=2.0)2.0 else if(ratio<0.8)-2.0 else 0.0)+(if(distance<=3.0)1.0 else 0.0)
+            val score=(c.score+confirmation).coerceIn(0.0,100.0)
+            if(score<settings.minScore.coerceAtLeast(60.0))continue
+            confirmed+=c.copy(
+                price=q.lastPrice,upperCircuit=q.upperCircuit,dayChangePercent=q.dayChangePercent,score=score,
+                buySellRatio=ratio,generatedAt=System.currentTimeMillis(),
+                activeStrategies=(c.activeStrategies+listOf("UC_LIVE","EXECUTION_READY","3PM_FAST_CONFIRMED")).distinct()
+            )
+        }
+        val picks=confirmed.sortedWith(compareByDescending<Candidate>{it.score}.thenByDescending{it.buySellRatio}).take(settings.maxFinalCandidates.coerceIn(1,5))
         prefs.setLastNearCloseAutoScanAt(System.currentTimeMillis())
         if(picks.isNotEmpty()){
-            recordCandidateCalls(ScannerSection.UC_CONTINUATION,TradeCallBucket.THREE_PM,picks,"UC 3 PM next-trading-day LONG prediction",System.currentTimeMillis())
-            DiagnosticLog.log(appContext,"UC-3PM","published ${picks.size} next-session LONG pick(s): ${picks.joinToString{it.symbol}}")
-        }else DiagnosticLog.log(appContext,"UC-3PM","no qualified next-session pick; retry allowed until 15:30")
+            recordCandidateCalls(ScannerSection.UC_CONTINUATION,TradeCallBucket.THREE_PM,picks,"UC 3 PM precomputed + fast-confirmed LONG prediction",System.currentTimeMillis())
+            DiagnosticLog.log(appContext,"UC-3PM","FAST published "+picks.size+" next-session LONG pick(s): "+picks.joinToString{it.symbol})
+        }else DiagnosticLog.log(appContext,"UC-3PM","FAST no qualified pick after live depth confirmation; safety floor retained")
         picks
     }
 
