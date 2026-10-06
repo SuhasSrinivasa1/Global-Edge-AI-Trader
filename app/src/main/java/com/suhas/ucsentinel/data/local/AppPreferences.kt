@@ -788,11 +788,16 @@ class AppPreferences(private val context:Context){
         .put("openedAt",x.openedAt).put("resolveAt",x.resolveAt).put("scheduledSessionDate",x.scheduledSessionDate)
         .put("researchSignature",x.researchSignature).put("evidence",x.evidence).put("outcome",x.outcome.name).put("resolvedAt",x.resolvedAt)
         .put("horizonPrice",finite(x.horizonPrice)).put("returnPct",finite(x.returnPct)).put("note",x.note)
+        .put("targetPct",finite(x.targetPct)).put("stopPct",finite(x.stopPct)).put("sessionBand",x.sessionBand).put("regime",x.regime)
+        .put("componentStrategyIds",JSONArray().apply{x.componentStrategyIds.forEach{put(it)}}).put("modelVersion",x.modelVersion)
     private fun challengerFromJson(j:JSONObject)=ChallengerShadowRecord(j.optString("id"),j.optString("strategyId"),j.optString("strategyName"),j.optString("symbol"),
         runCatching{TradeDirection.valueOf(j.optString("direction"))}.getOrDefault(TradeDirection.LONG),j.optDouble("score"),j.optDouble("entryPrice"),
         j.optLong("openedAt"),j.optLong("resolveAt"),j.optString("scheduledSessionDate"),j.optString("researchSignature"),j.optString("evidence"),
         runCatching{ChallengerShadowOutcome.valueOf(j.optString("outcome"))}.getOrDefault(ChallengerShadowOutcome.PENDING),
-        j.optLong("resolvedAt"),j.optDouble("horizonPrice"),j.optDouble("returnPct"),j.optString("note"))
+        j.optLong("resolvedAt"),j.optDouble("horizonPrice"),j.optDouble("returnPct"),j.optString("note"),
+        j.optDouble("targetPct"),j.optDouble("stopPct"),j.optString("sessionBand"),j.optString("regime"),
+        buildList{val a=j.optJSONArray("componentStrategyIds")?:JSONArray();for(i in 0 until a.length()){val v=a.optString(i);if(v.isNotBlank())add(v)}},
+        j.optString("modelVersion","LEGACY-V1"))
     fun loadChallengerShadows(limit:Int=4000):List<ChallengerShadowRecord>{
         val a=runCatching{JSONArray(prefs.getString("challenger_shadow_v150","[]")?:"[]")}.getOrElse{JSONArray()}
         return buildList{for(i in 0 until a.length())runCatching{add(challengerFromJson(a.getJSONObject(i)))}}
