@@ -61,6 +61,23 @@ class MarketScanService: Service() {
             repo.markScannerHeartbeat(status,nowMs)
             if(repo.learningVaultConfigured())repo.backupLearningVaultIfDue()
             try {
+                // v1.7: do the expensive full-NSE 3 PM ranking BEFORE the execution window. The final
+                // 15:10–15:30 pass becomes a fast quote/depth confirmation and survives OEM process churn.
+                if(session.isOpen&&settings.autoScanEnabled&&nowZ.toLocalTime()>=LocalTime.of(14,45)&&nowZ.toLocalTime()<LocalTime.of(15,10)&&!repo.hasThreePmPrepToday()){
+                    status="3 PM UC PREP • precomputing next-session shortlist"
+                    marketJob?.cancel(CancellationException("3 PM UC prep"))
+                    strategyJob?.cancel(CancellationException("3 PM UC prep"))
+                    globalJob?.cancel(CancellationException("3 PM UC prep"))
+                    if(repo.ensureAutomationAuthentication()){
+                        runCatching{withTimeout(240_000L){repo.prepareUpperCircuitThreePm()}}
+                            .onSuccess{DiagnosticLog.log(this,"UC-3PM-PREP","service prepared $it names")}
+                            .onFailure{DiagnosticLog.log(this,"UC-3PM-PREP","service preparation failed",it)}
+                    }
+                    repo.markScannerHeartbeat(status,System.currentTimeMillis())
+                    updateNotification(status)
+                    delay(60_000L)
+                    continue
+                }
                 // Absolute 3 PM priority: no Strategy/Global/normal UC job may occupy the 15:10–15:30 window
                 // before the next-session UC predictor gets its attempt.
                 if(session.isOpen&&settings.autoScanEnabled&&AutomationPolicy.isThreePmPriorityWindow(nowZ.toLocalTime())){
