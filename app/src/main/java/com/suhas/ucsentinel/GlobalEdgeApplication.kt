@@ -40,7 +40,7 @@ class GlobalEdgeApplication:Application(){
         }
 
         // Daily safety anchors. The foreground service remains the owner; these only recover stale service state.
-        listOf(LocalTime.of(9,15),LocalTime.of(15,10),LocalTime.of(15,20),LocalTime.of(15,25)).forEach{t->
+        listOf(LocalTime.of(9,15),LocalTime.of(14,50),LocalTime.of(15,10),LocalTime.of(15,20),LocalTime.of(15,25)).forEach{t->
             var target=now.toLocalDate().atTime(t).atZone(ist)
             if(!target.isAfter(now))target=target.plusDays(1)
             val delay=Duration.between(now,target).toMillis().coerceAtLeast(0L)
