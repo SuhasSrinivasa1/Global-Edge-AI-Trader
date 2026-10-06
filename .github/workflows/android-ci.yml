@@ -61,7 +61,7 @@ jobs:
           grep -q 'thresholdPool' app/src/main/java/com/suhas/ucsentinel/domain/engine/ScannerEngine.kt
           grep -q 'scanner_service_heartbeat_at_v170' app/src/main/java/com/suhas/ucsentinel/data/local/AppPreferences.kt
           grep -q 'SESSION_SYMBOL_CHURN_BLOCK' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
-          grep -q 'SESSION_COLD_PROBATION' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
+          grep -q 'SESSION_KILL_SWITCH' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
           grep -q '15,10' app/src/main/java/com/suhas/ucsentinel/domain/engine/AutomationPolicy.kt
           test -f app/src/main/java/com/suhas/ucsentinel/data/local/PersistentLearningVault.kt
           grep -q 'global_edge_learning_vault_control_v171' app/src/main/java/com/suhas/ucsentinel/data/local/PersistentLearningVault.kt
