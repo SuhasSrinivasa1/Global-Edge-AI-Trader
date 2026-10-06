@@ -43,14 +43,17 @@ jobs:
         shell: bash
         run: gradle --no-daemon --console=plain clean testDebugUnitTest assembleRelease
 
-      - name: Verify v1.6.11 package metadata and hardening
+      - name: Verify v1.6.12 package metadata and hardening
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'versionCode = 171' app/build.gradle.kts
-          grep -q 'versionName = "1.6.11"' app/build.gradle.kts
+          grep -q 'versionCode = 172' app/build.gradle.kts
+          grep -q 'versionName = "1.6.12"' app/build.gradle.kts
           grep -q 'trusted_multify_package_v168' app/src/main/java/com/suhas/ucsentinel/notifications/MultifyNotificationService.kt
           grep -q 'Trust the exact detected Multify Android package' app/src/main/java/com/suhas/ucsentinel/ui/MainViewModel.kt
+          grep -q 'submitManualMultifyEvent' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
+          grep -q 'MANUAL_MULTIFY_SOURCE="manual:in-app"' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
+          grep -q 'MANUAL MULTIFY ENTRY' app/src/main/java/com/suhas/ucsentinel/ui/MultifyScreen.kt
           grep -q 'bayesianWinRatePct' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
           grep -q 'CONFIRM_1M' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
           grep -q 'scanUpperCircuitThreePm' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
@@ -69,7 +72,7 @@ jobs:
       - name: Upload unsigned release APK
         uses: actions/upload-artifact@v4
         with:
-          name: Global-Edge-AI-Trader-v1.6.11-unsigned
+          name: Global-Edge-AI-Trader-v1.6.12-unsigned
           retention-days: 30
           if-no-files-found: error
           path: app/build/outputs/apk/release/app-release-unsigned.apk
