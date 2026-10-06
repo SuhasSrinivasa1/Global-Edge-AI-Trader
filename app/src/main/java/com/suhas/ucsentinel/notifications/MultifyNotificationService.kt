@@ -129,7 +129,7 @@ object MultifyNotificationParser {
     private fun parseSymbol(upper:String,direction:String):String{
         fun valid(v:String?):String?{
             val x=v.orEmpty().trim('.', '-', ' ')
-            return x.takeIf{it.length in 2..20&&it !in BLOCKED&&!it.endsWith("CE")&&!it.endsWith("PE")&&!it.all(Char::isDigit)}
+            return x.takeIf{it.length in 2..20&&it !in BLOCKED&&!it.all(Char::isDigit)}
         }
         val directional=when(direction){
             "BUY"->Regex("\\b(?:BUY|LONG|ENTRY\\s+LONG|GO\\s+LONG|BOUGHT)\\b\\s*[:=\\-]?\\s*(?:NSE[:\\s-]*)?([A-Z][A-Z0-9&.\\-]{1,19})")
