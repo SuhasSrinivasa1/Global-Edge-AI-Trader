@@ -272,7 +272,7 @@ class MultifyNotificationService:NotificationListenerService(){
         n.actions?.mapNotNull{it.title?.toString()}?.filter{it.isNotBlank()}?.let(parts::addAll)
         val pkg=sbn.packageName.orEmpty()
         if(!MultifyEventStore.observeCandidatePackage(applicationContext,pkg))return
-        val parsed=MultifyNotificationParser.parse(title,parts,sbn.isOngoing||(n.flags and Notification.FLAG_ONGOING)!=0)
+        val parsed=MultifyNotificationParser.parse(title,parts,sbn.isOngoing||(n.flags and Notification.FLAG_ONGOING_EVENT)!=0)
         if(parsed.raw.isBlank())return
         if(parsed.noise){
             DiagnosticLog.log(applicationContext,"MULTIFY-PARSER","ignored non-signal/status notification • package="+pkg+" • "+parsed.raw.take(180))
