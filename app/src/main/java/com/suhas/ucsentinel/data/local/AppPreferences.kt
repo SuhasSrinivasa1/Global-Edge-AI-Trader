@@ -100,13 +100,20 @@ class AppPreferences(private val context:Context){
         .put("listingAgeDays",x.listingAgeDays?:-1).put("generatedAt",x.generatedAt)
         .put("researchSignature",x.researchSignature).put("handbookQualityPct",finite(x.handbookQualityPct))
         .put("handbookPattern",x.handbookPattern).put("handbookCombination",x.handbookCombination)
+        .put("rawScore",finite(x.rawScore)).put("calibratedProbabilityPct",finite(x.calibratedProbabilityPct)).put("expectedR",finite(x.expectedR))
+        .put("contextBand",x.contextBand).put("contextRegime",x.contextRegime)
+        .put("componentStrategyIds",JSONArray().apply{x.componentStrategyIds.forEach{put(it)}}).put("strategyModelVersion",x.modelVersion)
 
     private fun strategySetupFromJson(x:JSONObject):StrategySetup = StrategySetup(
         x.optString("symbol"),x.optString("companyName"),x.optString("strategyId"),x.optString("strategyName"),
         runCatching{TradeDirection.valueOf(x.optString("direction"))}.getOrDefault(TradeDirection.LONG),
         x.optDouble("score"),x.optDouble("entryPrice"),x.optDouble("targetPct"),x.optDouble("stopPct"),x.optString("evidence"),
         x.optLong("listingAgeDays",-1).takeIf{it>=0},x.optLong("generatedAt"),
-        x.optString("researchSignature"),x.optDouble("handbookQualityPct"),x.optString("handbookPattern"),x.optString("handbookCombination")
+        x.optString("researchSignature"),x.optDouble("handbookQualityPct"),x.optString("handbookPattern"),x.optString("handbookCombination"),
+        x.optDouble("rawScore",x.optDouble("score")),x.optDouble("calibratedProbabilityPct",0.0),x.optDouble("expectedR",0.0),
+        x.optString("contextBand"),x.optString("contextRegime"),
+        buildList{val a=x.optJSONArray("componentStrategyIds")?:JSONArray();for(i in 0 until a.length()){val v=a.optString(i);if(v.isNotBlank())add(v)}},
+        x.optString("strategyModelVersion","LEGACY-V1")
     )
 
     private fun recommendationToJson(r:StrategyRecommendation):JSONObject = JSONObject()
@@ -129,10 +136,12 @@ class AppPreferences(private val context:Context){
     fun saveStrategySummary(summary:StrategyTournamentSummary){
         val setups=JSONArray();summary.topSetups.forEach{x->setups.put(strategySetupToJson(x))}
         val active=JSONArray();summary.activeStrategies.forEach{x->active.put(strategyDefToJson(x))}
-        val perfs=JSONArray();summary.performances.forEach{x->perfs.put(JSONObject().put("strategyId",x.strategyId).put("name",x.name).put("observations",x.observations).put("wins",x.wins).put("accuracyPct",finite(x.accuracyPct)).put("avgReturnPct",finite(x.avgReturnPct)).put("expectancyPct",finite(x.expectancyPct)).put("maxDrawdownPct",finite(x.maxDrawdownPct)).put("confidenceFloorPct",finite(x.confidenceFloorPct)).put("status",x.status.name))}
+        val perfs=JSONArray();summary.performances.forEach{x->perfs.put(JSONObject().put("strategyId",x.strategyId).put("name",x.name).put("observations",x.observations).put("wins",x.wins).put("accuracyPct",finite(x.accuracyPct)).put("avgReturnPct",finite(x.avgReturnPct)).put("expectancyPct",finite(x.expectancyPct)).put("maxDrawdownPct",finite(x.maxDrawdownPct)).put("confidenceFloorPct",finite(x.confidenceFloorPct)).put("status",x.status.name)
+            .put("recentAccuracyPct",finite(x.recentAccuracyPct)).put("distinctSessions",x.distinctSessions).put("shadowAccuracyPct",finite(x.shadowAccuracyPct)).put("netExpectancyR",finite(x.netExpectancyR)).put("contextLabel",x.contextLabel))}
         val insights=JSONArray();summary.championInsights.forEach{insights.put(it)}
         val root=JSONObject().put("generatedAt",summary.generatedAt).put("universeCount",summary.universeCount).put("strategiesRun",summary.strategiesRun).put("symbolsEnriched",summary.symbolsEnriched).put("catalogVersion",summary.catalogVersion).put("message",summary.message).put("topSetups",setups).put("activeStrategies",active).put("performances",perfs)
             .put("championInsights",insights).put("rejectedJournalCount",summary.rejectedJournalCount).put("handbookVersion",summary.handbookVersion)
+            .put("productionRosterDate",summary.productionRosterDate).put("productionContext",summary.productionContext).put("strategyV2EventCount",summary.strategyV2EventCount)
         // v1.1.0: the persistent recommendation ledger is the source of truth. Do not overwrite a same-day
         // strategy list on every scan; that was the reason notified ideas appeared to vanish.
         prefs.edit().putString("strategy_tournament_summary",root.toString()).putLong("last_strategy_scan_at",summary.generatedAt)
@@ -143,9 +152,11 @@ class AppPreferences(private val context:Context){
         return runCatching{
             val j=JSONObject(raw);val setups=jsonToSetups(j.optJSONArray("topSetups")?:JSONArray());val defs=jsonToDefs(j.optJSONArray("activeStrategies")?:JSONArray())
             val pfs=j.optJSONArray("performances")?:JSONArray()
-            val perfs=buildList{for(i in 0 until pfs.length()){val x=pfs.optJSONObject(i)?:continue;add(StrategyPerformance(x.optString("strategyId"),x.optString("name"),x.optInt("observations"),x.optInt("wins"),x.optDouble("accuracyPct"),x.optDouble("avgReturnPct"),x.optDouble("expectancyPct"),x.optDouble("maxDrawdownPct"),x.optDouble("confidenceFloorPct"),runCatching{StrategyStatus.valueOf(x.optString("status"))}.getOrDefault(StrategyStatus.CHALLENGER)))}}
+            val perfs=buildList{for(i in 0 until pfs.length()){val x=pfs.optJSONObject(i)?:continue;add(StrategyPerformance(x.optString("strategyId"),x.optString("name"),x.optInt("observations"),x.optInt("wins"),x.optDouble("accuracyPct"),x.optDouble("avgReturnPct"),x.optDouble("expectancyPct"),x.optDouble("maxDrawdownPct"),x.optDouble("confidenceFloorPct"),runCatching{StrategyStatus.valueOf(x.optString("status"))}.getOrDefault(StrategyStatus.CHALLENGER),
+                x.optDouble("recentAccuracyPct"),x.optInt("distinctSessions"),x.optDouble("shadowAccuracyPct"),x.optDouble("netExpectancyR"),x.optString("contextLabel")))}}
             val ia=j.optJSONArray("championInsights")?:JSONArray();val insights=buildList{for(i in 0 until ia.length()){val v=ia.optString(i);if(v.isNotBlank())add(v)}}
-            StrategyTournamentSummary(j.optLong("generatedAt"),j.optInt("universeCount"),j.optInt("strategiesRun"),j.optInt("symbolsEnriched"),setups,defs,perfs,j.optString("catalogVersion"),j.optString("message"),insights,j.optInt("rejectedJournalCount"),j.optString("handbookVersion"))
+            StrategyTournamentSummary(j.optLong("generatedAt"),j.optInt("universeCount"),j.optInt("strategiesRun"),j.optInt("symbolsEnriched"),setups,defs,perfs,j.optString("catalogVersion"),j.optString("message"),insights,j.optInt("rejectedJournalCount"),j.optString("handbookVersion"),
+                j.optString("productionRosterDate"),j.optString("productionContext"),j.optInt("strategyV2EventCount"))
         }.getOrNull()
     }
 
@@ -161,7 +172,7 @@ class AppPreferences(private val context:Context){
     }
     fun saveStrategyLedger(live:List<StrategyRecommendation>,closed:List<StrategyRecommendation>){
         val la=JSONArray();live.sortedByDescending{it.openedAt}.take(100).forEach{la.put(recommendationToJson(it))}
-        val ca=JSONArray();closed.sortedByDescending{it.closedAt}.take(500).forEach{ca.put(recommendationToJson(it))}
+        val ca=JSONArray();closed.sortedByDescending{it.closedAt}.take(1500).forEach{ca.put(recommendationToJson(it))}
         prefs.edit().putString("strategy_live_ledger",la.toString()).putString("strategy_closed_ledger",ca.toString()).apply()
     }
 
@@ -403,6 +414,21 @@ class AppPreferences(private val context:Context){
     fun pendingStrategySetups(date:String):List<StrategySetup> =jsonToSetups(runCatching{JSONArray(prefs.getString("strategy_pending_$date","[]"))}.getOrElse{JSONArray()})
     fun strategyDateEvaluated(date:String)=prefs.getBoolean("strategy_evaluated_$date",false)
     fun markStrategyDateEvaluated(date:String){prefs.edit().putBoolean("strategy_evaluated_$date",true).apply()}
+    fun strategyV2Migrated():Boolean=prefs.getBoolean("strategy_v2_room_migrated_170",false)
+    fun markStrategyV2Migrated(){prefs.edit().putBoolean("strategy_v2_room_migrated_170",true).apply()}
+    fun legacyStrategyPriors():List<StrategyLegacyPrior>{
+        val root=runCatching{JSONObject(prefs.getString("strategy_stats","{}")?:"{}")}.getOrElse{JSONObject()}
+        val out=mutableListOf<StrategyLegacyPrior>();val keys=root.keys()
+        while(keys.hasNext()){
+            val id=keys.next();val x=root.optJSONObject(id)?:continue
+            val n=x.optInt("observations").coerceAtLeast(0);if(n<=0)continue
+            val w=x.optInt("wins").coerceIn(0,n)
+            val avg=storedFinite(x,"sumReturn")/n
+            out+=StrategyLegacyPrior(id,x.optString("name",id),n,w,finite(avg))
+        }
+        return out
+    }
+
     fun updateStrategyResult(strategyId:String,name:String,returnPct:Double,win:Boolean){
         val safeReturn=finite(returnPct)
         val root=runCatching{JSONObject(prefs.getString("strategy_stats","{}")?:"{}")}.getOrElse{JSONObject()}
