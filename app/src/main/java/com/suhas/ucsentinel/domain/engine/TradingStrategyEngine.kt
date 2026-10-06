@@ -6,12 +6,13 @@ import kotlin.math.*
 class TradingStrategyEngine{
     data class Eval(val direction:TradeDirection,val score:Double,val targetPct:Double,val stopPct:Double,val evidence:String)
 
-    private fun evaluateEarly(def:TradingStrategyDefinition,candles:List<Candle>):Eval?{
+    private fun evaluateEarly(def:TradingStrategyDefinition,candles:List<Candle>,previousSessionClose:Double?=null,sameSlotHistoricalVolumes:List<Long> = emptyList()):Eval?{
         if(candles.size<2)return null
         val c=candles.last();val p=candles[candles.lastIndex-1]
         if(!c.open.isFinite()||!c.high.isFinite()||!c.low.isFinite()||!c.close.isFinite()||c.close<=0.0)return null
-        val priorVol=candles.dropLast(1).map{it.volume.toDouble()}.average().coerceAtLeast(1.0)
-        val rvol=(c.volume/priorVol).takeIf{it.isFinite()}?:0.0
+        val intradayVol=candles.dropLast(1).map{it.volume.toDouble()}.average().takeIf{it.isFinite()&&it>0.0}?:1.0
+        val slotVol=sameSlotHistoricalVolumes.filter{it>0L}.map{it.toDouble()}.average().takeIf{it.isFinite()&&it>0.0}
+        val rvol=(c.volume/(slotVol?:intradayVol)).takeIf{it.isFinite()}?:0.0
         val totalVol=candles.sumOf{it.volume.toDouble()}.coerceAtLeast(1.0)
         val vwap=(candles.sumOf{((it.high+it.low+it.close)/3.0)*it.volume}/totalVol).takeIf{it.isFinite()}?:c.close
         val green=c.close>c.open;val red=c.close<c.open
@@ -48,20 +49,30 @@ class TradingStrategyEngine{
                 curRange>=prevRange*1.15&&red&&c.close<p.low->mk(TradeDirection.SHORT,77.0,"range expansion below prior 5-minute low")
                 else->null
             }
+            "GAP_GO"->{
+                val prevClose=previousSessionClose?.takeIf{it>0.0}?:return null
+                val gap=(candles.first().open/prevClose-1.0)*100.0
+                when{
+                    gap>=0.60&&c.close>vwap&&green->mk(TradeDirection.LONG,78.0+min(8.0,gap),"true prior-session gap + VWAP hold • gap %.2f%% • RVOL %.2fx".format(gap,rvol))
+                    gap<=-0.60&&c.close<vwap&&red->mk(TradeDirection.SHORT,78.0+min(8.0,abs(gap)),"true prior-session gap-down + VWAP reject • gap %.2f%% • RVOL %.2fx".format(gap,rvol))
+                    else->null
+                }
+            }
             else->null
         }
     }
 
-    fun evaluate(def:TradingStrategyDefinition,candles:List<Candle>):Eval?{
+    fun evaluate(def:TradingStrategyDefinition,candles:List<Candle>,previousSessionClose:Double?=null,sameSlotHistoricalVolumes:List<Long> = emptyList()):Eval?{
         if(candles.size<2)return null
-        if(candles.size<4)return evaluateEarly(def,candles)
+        if(candles.size<4)return evaluateEarly(def,candles,previousSessionClose,sameSlotHistoricalVolumes)
         val c=candles.last();val p=candles[candles.lastIndex-1]
         if(!c.open.isFinite()||!c.high.isFinite()||!c.low.isFinite()||!c.close.isFinite()||c.close<=0.0)return null
         val closes=candles.map{it.close};val vols=candles.map{it.volume.toDouble()}
         fun sma(n:Int)=closes.takeLast(n.coerceAtMost(closes.size)).average()
         fun ema(n:Int):Double{val k=2.0/(n+1);var e=closes.first();closes.forEach{e=it*k+e*(1-k)};return e}
         fun avgv(n:Int)=vols.takeLast(n.coerceAtMost(vols.size)).average().coerceAtLeast(1.0)
-        val rvol=(c.volume/avgv(20)).takeIf{it.isFinite()}?:0.0
+        val slotVol=sameSlotHistoricalVolumes.filter{it>0L}.map{it.toDouble()}.average().takeIf{it.isFinite()&&it>0.0}
+        val rvol=(c.volume/(slotVol?:avgv(20))).takeIf{it.isFinite()}?:0.0
         val ema9=ema(9);val ema21=ema(21);val ema50=ema(50)
         val rsi14=Indicators.rsi(candles,14);val rsi2=Indicators.rsi(candles,2)
         val atr=(Indicators.atrPercent(candles,14).takeIf{it.isFinite()}?:0.05).coerceAtLeast(0.05)
@@ -72,7 +83,8 @@ class TradingStrategyEngine{
         val body=abs(c.close-c.open);val upperWick=c.high-max(c.open,c.close);val lowerWick=min(c.open,c.close)-c.low
         val session=candles.takeLast(min(75,candles.size));val totalVol=session.sumOf{it.volume.toDouble()}.coerceAtLeast(1.0)
         val vwap=(session.sumOf{((it.high+it.low+it.close)/3.0)*it.volume}/totalVol).takeIf{it.isFinite()}?:c.close
-        val gapPct=if(candles.first().open>0)(candles.first().open/candles.first().close-1)*100 else 0.0
+        val sessionOpen=candles.first().open
+        val gapPct=previousSessionClose?.takeIf{it>0.0}?.let{(sessionOpen/it-1.0)*100.0}?:0.0
         val trendLong=ema9>ema21 && ema21>ema50;val trendShort=ema9<ema21 && ema21<ema50
         val green=c.close>c.open;val red=c.close<c.open
         fun emaSeries(values:List<Double>,n:Int):List<Double>{if(values.isEmpty())return emptyList();val k=2.0/(n+1.0);var e=values.first();return values.map{v->e=v*k+e*(1-k);e}}
@@ -119,7 +131,11 @@ class TradingStrategyEngine{
             "HAMMER"->when{lowerWick>body*2&&upperWick<body&&green->mk(TradeDirection.LONG,73,"Hammer-style lower-wick rejection");upperWick>body*2&&lowerWick<body&&red->mk(TradeDirection.SHORT,73,"Shooting-star upper-wick rejection");else->null}
             "MORNING_STAR"->{val t=candles.takeLast(3);val a=t[0];val b=t[1];val d=t[2];when{a.close<a.open&&abs(b.close-b.open)<abs(a.close-a.open)*0.5&&d.close>d.open&&d.close>(a.open+a.close)/2->mk(TradeDirection.LONG,75,"Morning-star reversal");a.close>a.open&&abs(b.close-b.open)<abs(a.close-a.open)*0.5&&d.close<d.open&&d.close<(a.open+a.close)/2->mk(TradeDirection.SHORT,75,"Evening-star reversal");else->null}}
             "THREE_SOLDIERS"->{val t=candles.takeLast(3);when{t.all{it.close>it.open}&&t.zipWithNext().all{(a,b)->b.close>a.close}->mk(TradeDirection.LONG,76,"Three-candle bullish staircase");t.all{it.close<it.open}&&t.zipWithNext().all{(a,b)->b.close<a.close}->mk(TradeDirection.SHORT,76,"Three-candle bearish staircase");else->null}}
-            "GAP_GO"->when{c.open>p.close*1.006&&c.close>vwap&&green->mk(TradeDirection.LONG,80+min(10.0,rvol*2),"Gap accepted above VWAP");c.open<p.close*0.994&&c.close<vwap&&red->mk(TradeDirection.SHORT,80+min(10.0,rvol*2),"Gap-down accepted below VWAP");else->null}
+            "GAP_GO"->when{
+                previousSessionClose!=null&&gapPct>=0.60&&c.close>vwap&&green->mk(TradeDirection.LONG,80+min(10.0,abs(gapPct)+rvol),"True prior-session gap accepted above VWAP • gap %.2f%%".format(gapPct))
+                previousSessionClose!=null&&gapPct<=-0.60&&c.close<vwap&&red->mk(TradeDirection.SHORT,80+min(10.0,abs(gapPct)+rvol),"True prior-session gap-down accepted below VWAP • gap %.2f%%".format(gapPct))
+                else->null
+            }
             "NR7_EXPANSION"->{val prev7=candles.dropLast(1).takeLast(7);val narrow=prev7.isNotEmpty()&&(p.high-p.low)<=prev7.minOf{it.high-it.low}+1e-9;when{narrow&&lastRange>avgRange*1.3&&green->mk(TradeDirection.LONG,77,"NR7 compression expanded upward");narrow&&lastRange>avgRange*1.3&&red->mk(TradeDirection.SHORT,77,"NR7 compression expanded downward");else->null}}
             "VOLUME_BREAKOUT"->when{c.close>hi20&&rvol>=1.8->mk(TradeDirection.LONG,84+min(12.0,(rvol-1.8)*5),"Price breakout + %.1fx relative volume".format(rvol));c.close<lo20&&rvol>=1.8->mk(TradeDirection.SHORT,84+min(12.0,(rvol-1.8)*5),"Price breakdown + %.1fx relative volume".format(rvol));else->null}
             "ATR_BREAKOUT"->when{lastRange/c.close*100>atr*1.4&&green&&c.close>p.high->mk(TradeDirection.LONG,78,"ATR-normalized upside impulse");lastRange/c.close*100>atr*1.4&&red&&c.close<p.low->mk(TradeDirection.SHORT,78,"ATR-normalized downside impulse");else->null}
