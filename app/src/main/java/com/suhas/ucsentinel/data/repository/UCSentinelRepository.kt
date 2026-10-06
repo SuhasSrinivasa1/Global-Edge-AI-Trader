@@ -45,7 +45,7 @@ class GlobalEdgeAITraderRepository(context:Context){
     private val strategyLearning=strategyDb.dao()
     private val strategyGovernance=StrategyGovernanceV2()
     private val regimeClassifier=MarketRegimeClassifier()
-    private val learningVault=PersistentLearningVault(appContext)
+    private val learningVault=PersistentLearningVault(appContext,strategyDb)
     private val groww=GrowwClient()
     private val news=ExchangeNewsClient()
     private val nseMaster=NseSecurityMasterClient()
