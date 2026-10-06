@@ -59,6 +59,7 @@ class MarketScanService: Service() {
             val settings = repo.settings()
             var status = if (session.isOpen) "Market open • 5 min synchronized scanner active" else "Off-hours • UC next-session + Global 24h research active"
             repo.markScannerHeartbeat(status,nowMs)
+            if(repo.learningVaultConfigured())repo.backupLearningVaultIfDue()
             try {
                 // Absolute 3 PM priority: no Strategy/Global/normal UC job may occupy the 15:10–15:30 window
                 // before the next-session UC predictor gets its attempt.
