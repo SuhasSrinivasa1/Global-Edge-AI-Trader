@@ -24,6 +24,12 @@ class ScanWorker(appContext:Context,params:WorkerParameters):CoroutineWorker(app
         DiagnosticLog.log(applicationContext,"WORKER","ScanWorker start • phase="+session.phase+" • force="+forceMarketPass+" • serviceFresh="+serviceFresh)
 
         val inMarket=session.isOpen
+        if(inMarket&&settings.autoScanEnabled&&now>=LocalTime.of(14,45)&&now<LocalTime.of(15,10)&&!repo.hasThreePmPrepToday()){
+            if(repo.ensureAutomationAuthentication())runCatching{repo.prepareUpperCircuitThreePm()}
+                .onFailure{DiagnosticLog.log(applicationContext,"UC-3PM-PREP","worker preparation failed",it)}
+            if(repo.scannerHeartbeatFresh(nowMs)&&!forceMarketPass)return Result.success()
+        }
+
         if(inMarket&&settings.autoScanEnabled&&AutomationPolicy.isThreePmPriorityWindow(now)){
             if(repo.ensureAutomationAuthentication()){
                 val due=!repo.hasThreePmUcToday()&&(forceMarketPass||nowMs-repo.lastNearCloseAutoScanAt()>=4L*60_000L)
