@@ -5,8 +5,10 @@ import android.content.Intent
 import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 
-class PersistentLearningVault(private val context:Context){
+class PersistentLearningVault(private val context:Context,private val strategyDb:StrategyLearningDatabase?=null){
     private val control=context.getSharedPreferences(CONTROL_PREFS,Context.MODE_PRIVATE)
 
     fun configured():Boolean=configuredUri().isNotBlank()
@@ -25,7 +27,8 @@ class PersistentLearningVault(private val context:Context){
         val raw=context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use{it.readText()}
             ?:error("Unable to read selected learning vault")
         val root=JSONObject(raw)
-        require(root.optInt("schemaVersion")==SCHEMA_VERSION){"Unsupported learning-vault schema"}
+        val schema=root.optInt("schemaVersion",1)
+        require(schema in 1..SCHEMA_VERSION){"Unsupported learning-vault schema"}
         val stores=root.optJSONObject("stores")?:error("Learning vault has no stores")
         var restored=0
         for(storeName in STORES){
@@ -61,6 +64,12 @@ class PersistentLearningVault(private val context:Context){
         context.getSharedPreferences("global_edge_multify_events",Context.MODE_PRIVATE).edit()
             .remove("trusted_multify_package_v168")
             .apply()
+        if(schema>=2&&strategyDb!=null){
+            val room=root.optJSONObject("strategyRoomV2")
+            if(room!=null){
+                restored+=restoreStrategyRoom(room,strategyDb)
+            }
+        }
         control.edit().putString(KEY_URI,uri.toString())
             .putLong(KEY_LAST_RESTORE_AT,System.currentTimeMillis())
             .apply()
@@ -111,6 +120,11 @@ class PersistentLearningVault(private val context:Context){
             .put("containsCredentials",false)
             .put("containsLiveOrderArm",false)
             .put("stores",stores)
+        if(strategyDb!=null){
+            val room=exportStrategyRoom(strategyDb)
+            root.put("strategyRoomV2",room.first)
+            count+=room.second
+        }
         context.contentResolver.openOutputStream(uri,"wt")?.bufferedWriter(Charsets.UTF_8)?.use{writer->
             writer.write(root.toString())
         }?:error("Unable to write selected learning vault")
@@ -131,8 +145,69 @@ class PersistentLearningVault(private val context:Context){
         return false
     }
 
+    private fun exportStrategyRoom(db:StrategyLearningDatabase):Pair<JSONObject,Int>{
+        return runBlocking(Dispatchers.IO){
+            val dao=db.dao()
+            val events=dao.recentEvents(50_000)
+            val priors=dao.allPriors()
+            val rosters=dao.allRosters()
+            val ea=JSONArray()
+            events.forEach{x->ea.put(JSONObject()
+                .put("eventId",x.eventId).put("strategyId",x.strategyId).put("strategyName",x.strategyName).put("symbol",x.symbol)
+                .put("direction",x.direction).put("source",x.source).put("sessionBand",x.sessionBand).put("regime",x.regime)
+                .put("rawScore",x.rawScore).put("calibratedProbabilityPct",x.calibratedProbabilityPct).put("entryPrice",x.entryPrice)
+                .put("targetPct",x.targetPct).put("stopPct",x.stopPct).put("openedAt",x.openedAt).put("closedAt",x.closedAt)
+                .put("sessionDate",x.sessionDate).put("outcome",x.outcome).put("returnPct",x.returnPct).put("rMultiple",x.rMultiple)
+                .put("researchSignature",x.researchSignature).put("componentStrategyIds",x.componentStrategyIds).put("clusterKey",x.clusterKey)
+                .put("sampleWeight",x.sampleWeight).put("legacy",x.legacy).put("modelVersion",x.modelVersion))}
+            val pa=JSONArray()
+            priors.forEach{x->pa.put(JSONObject().put("strategyId",x.strategyId).put("strategyName",x.strategyName)
+                .put("observations",x.observations).put("wins",x.wins).put("avgReturnPct",x.avgReturnPct).put("importedAt",x.importedAt))}
+            val ra=JSONArray()
+            rosters.forEach{x->ra.put(JSONObject()
+                .put("sessionDate",x.sessionDate).put("strategyId",x.strategyId).put("strategyName",x.strategyName).put("direction",x.direction)
+                .put("sessionBand",x.sessionBand).put("regime",x.regime).put("status",x.status).put("samples",x.samples).put("wins",x.wins)
+                .put("distinctSessions",x.distinctSessions).put("hitRatePct",x.hitRatePct).put("recentHitRatePct",x.recentHitRatePct)
+                .put("expectancyR",x.expectancyR).put("confidenceFloorPct",x.confidenceFloorPct).put("shadowSamples",x.shadowSamples)
+                .put("shadowHitRatePct",x.shadowHitRatePct).put("calibratedBasePct",x.calibratedBasePct).put("frozenAt",x.frozenAt).put("note",x.note))}
+            JSONObject().put("dbVersion",1).put("events",ea).put("priors",pa).put("rosters",ra) to (events.size+priors.size+rosters.size)
+        }
+    }
+
+    private fun restoreStrategyRoom(root:JSONObject,db:StrategyLearningDatabase):Int{
+        return runBlocking(Dispatchers.IO){
+            val events=mutableListOf<StrategyLearningEventEntity>()
+            val ea=root.optJSONArray("events")?:JSONArray()
+            for(i in 0 until ea.length()){
+                val x=ea.optJSONObject(i)?:continue
+                events+=StrategyLearningEventEntity(
+                    eventId=x.optString("eventId"),strategyId=x.optString("strategyId"),strategyName=x.optString("strategyName"),symbol=x.optString("symbol"),
+                    direction=x.optString("direction"),source=x.optString("source"),sessionBand=x.optString("sessionBand"),regime=x.optString("regime"),
+                    rawScore=x.optDouble("rawScore"),calibratedProbabilityPct=x.optDouble("calibratedProbabilityPct"),entryPrice=x.optDouble("entryPrice"),
+                    targetPct=x.optDouble("targetPct"),stopPct=x.optDouble("stopPct"),openedAt=x.optLong("openedAt"),closedAt=x.optLong("closedAt"),
+                    sessionDate=x.optString("sessionDate"),outcome=x.optString("outcome"),returnPct=x.optDouble("returnPct"),rMultiple=x.optDouble("rMultiple"),
+                    researchSignature=x.optString("researchSignature"),componentStrategyIds=x.optString("componentStrategyIds"),clusterKey=x.optString("clusterKey"),
+                    sampleWeight=x.optDouble("sampleWeight",1.0),legacy=x.optBoolean("legacy"),modelVersion=x.optString("modelVersion","STRAT-GOV-V2-1.7.0")
+                )
+            }
+            if(events.isNotEmpty())db.dao().insertEvents(events)
+            val priors=mutableListOf<StrategyLegacyPriorEntity>();val pa=root.optJSONArray("priors")?:JSONArray()
+            for(i in 0 until pa.length()){val x=pa.optJSONObject(i)?:continue;priors+=StrategyLegacyPriorEntity(
+                x.optString("strategyId"),x.optString("strategyName"),x.optInt("observations"),x.optInt("wins"),x.optDouble("avgReturnPct"),x.optLong("importedAt"))}
+            if(priors.isNotEmpty())db.dao().upsertPriors(priors)
+            val rosters=mutableListOf<StrategyRosterEntity>();val ra=root.optJSONArray("rosters")?:JSONArray()
+            for(i in 0 until ra.length()){val x=ra.optJSONObject(i)?:continue;rosters+=StrategyRosterEntity(
+                x.optString("sessionDate"),x.optString("strategyId"),x.optString("strategyName"),x.optString("direction"),x.optString("sessionBand"),x.optString("regime"),
+                x.optString("status"),x.optInt("samples"),x.optInt("wins"),x.optInt("distinctSessions"),x.optDouble("hitRatePct"),x.optDouble("recentHitRatePct"),
+                x.optDouble("expectancyR"),x.optDouble("confidenceFloorPct"),x.optInt("shadowSamples"),x.optDouble("shadowHitRatePct"),x.optDouble("calibratedBasePct"),
+                x.optLong("frozenAt"),x.optString("note"))}
+            if(rosters.isNotEmpty())db.dao().upsertRoster(rosters)
+            events.size+priors.size+rosters.size
+        }
+    }
+
     companion object{
-        private const val SCHEMA_VERSION=1
+        private const val SCHEMA_VERSION=2
         private const val CONTROL_PREFS="global_edge_learning_vault_control_v171"
         private const val KEY_URI="vault_uri"
         private const val KEY_LAST_BACKUP_AT="last_backup_at"
