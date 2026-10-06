@@ -1063,7 +1063,7 @@ class GlobalEdgeAITraderRepository(context:Context){
 
             val end=sessionDate.atTime(15,31).atZone(ist)
             val candles=runCatching{
-                groww.getHistoricalCandles(token,r.setup.symbol,opened.format(dateTimeFmt),end.format(dateTimeFmt),"5minute")
+                groww.getHistoricalCandles(token,r.setup.symbol,opened.format(dateTimeFmt),end.format(dateTimeFmt),"1minute")
             }.getOrNull()
             val q=runCatching{groww.getQuote(token,r.setup.symbol)}.getOrNull()
             val target=if(r.setup.direction==TradeDirection.LONG)r.setup.entryPrice*(1+r.setup.targetPct/100.0) else r.setup.entryPrice*(1-r.setup.targetPct/100.0)
@@ -1071,41 +1071,55 @@ class GlobalEdgeAITraderRepository(context:Context){
 
             var win=false
             var stopHit=false
-            val replayAvailable=candles!=null
+            var ambiguous=false
+            val replayAvailable=!candles.isNullOrEmpty()
             var exit=candles?.lastOrNull()?.close?.takeIf{it.isFinite()&&it>0.0}
                 ?:q?.lastPrice?.takeIf{it.isFinite()&&it>0.0}
                 ?:r.lastPrice.takeIf{it.isFinite()&&it>0.0}
                 ?:r.setup.entryPrice
 
             candles?.sortedBy{it.epochSeconds}?.forEach{c->
-                if(win||stopHit)return@forEach
+                if(win||stopHit||ambiguous)return@forEach
                 if(!c.high.isFinite()||!c.low.isFinite())return@forEach
                 val th=if(r.setup.direction==TradeDirection.LONG)c.high>=target else c.low<=target
                 val sh=if(r.setup.direction==TradeDirection.LONG)c.low<=stop else c.high>=stop
-                if(th&&sh){stopHit=true;exit=stop}
-                else if(sh){stopHit=true;exit=stop}
-                else if(th){win=true;exit=target}
+                when{
+                    th&&sh->{ambiguous=true;exit=c.close.takeIf{it.isFinite()&&it>0.0}?:r.setup.entryPrice}
+                    sh->{stopHit=true;exit=stop}
+                    th->{win=true;exit=target}
+                }
             }
 
             val rawRet=if(r.setup.entryPrice<=0.0||exit<=0.0)0.0 else if(r.setup.direction==TradeDirection.LONG)(exit/r.setup.entryPrice-1.0)*100.0 else (r.setup.entryPrice/exit-1.0)*100.0
             val ret=rawRet.takeIf{it.isFinite()}?:0.0
+            val comparable=replayAvailable&&!ambiguous
+            val status=when{
+                !replayAvailable->StrategyRecommendationStatus.INVALIDATED
+                ambiguous->StrategyRecommendationStatus.INVALIDATED
+                win->StrategyRecommendationStatus.WIN
+                else->StrategyRecommendationStatus.LOSS
+            }
             val done=r.copy(
                 lastSeenAt=System.currentTimeMillis(),
                 lastPrice=exit,
                 closedAt=System.currentTimeMillis(),
                 exitPrice=exit,
-                status=if(win)StrategyRecommendationStatus.WIN else StrategyRecommendationStatus.LOSS,
+                status=status,
                 returnPct=ret,
                 closeReason=when{
+                    !replayAvailable->"INVALID • historical 1-minute replay unavailable; excluded from learning"
+                    ambiguous->"INVALID • target and stop touched inside same 1-minute bar; excluded from learning"
                     win->"Target reached"
                     stopHit->"Stop reached"
-                    !replayAvailable->"Prediction horizon expired • historical replay unavailable"
                     else->"Target not reached by session close"
                 }
             )
             closed.removeAll{it.id==done.id}
             closed.add(done)
-            learningUpdates+=Triple(r.setup,ret,win)
+            if(comparable){
+                learningUpdates+=Triple(r.setup,ret,win)
+                recordStrategyLearningV2(done)
+            }
             changed++
         }
 
@@ -1118,52 +1132,121 @@ class GlobalEdgeAITraderRepository(context:Context){
         return changed
     }
 
-    private fun openChallengerShadow(setup:StrategySetup,nowMs:Long=System.currentTimeMillis()):Boolean{
-        val resolveAt=NseTradingCalendar2026.addTradingMinutes(nowMs,30)
-        val sessionDate=Instant.ofEpochMilli(resolveAt).atZone(ist).toLocalDate().toString()
+    private suspend fun openChallengerShadow(setup:StrategySetup,nowMs:Long=System.currentTimeMillis()):Boolean{
+        val opened=Instant.ofEpochMilli(nowMs).atZone(ist)
+        val sessionDate=opened.toLocalDate()
+        val resolveAt=sessionDate.atTime(15,31).atZone(ist).toInstant().toEpochMilli()
+        val components=setup.componentStrategyIds.ifEmpty{listOf(setup.strategyId)}.distinct()
         val x=ChallengerShadowRecord(
-            id="CHAL|${setup.strategyId}|${setup.direction.name}|${setup.symbol}|$nowMs",strategyId=setup.strategyId,strategyName=setup.strategyName,
-            symbol=setup.symbol,direction=setup.direction,score=setup.score,entryPrice=setup.entryPrice,openedAt=nowMs,resolveAt=resolveAt,
-            scheduledSessionDate=sessionDate,researchSignature=setup.researchSignature,evidence=setup.evidence
+            id="CHAL-V2|${setup.strategyId}|${setup.direction.name}|${setup.symbol}|$nowMs",
+            strategyId=setup.strategyId,strategyName=setup.strategyName,symbol=setup.symbol,direction=setup.direction,
+            score=setup.calibratedProbabilityPct.takeIf{it>0.0}?:setup.score,entryPrice=setup.entryPrice,openedAt=nowMs,resolveAt=resolveAt,
+            scheduledSessionDate=sessionDate.toString(),researchSignature=setup.researchSignature,evidence=setup.evidence,
+            targetPct=setup.targetPct,stopPct=setup.stopPct,sessionBand=setup.contextBand.ifBlank{strategyGovernance.sessionBand(opened.toLocalTime())},
+            regime=setup.contextRegime.ifBlank{MarketRegime.MIXED.name},componentStrategyIds=components,modelVersion=StrategyGovernanceV2.MODEL_VERSION
         )
         val added=prefs.appendChallengerShadow(x)
         if(added){
-            prefs.appendDecisionSnapshot(setup,"CHALLENGER_SHADOW","Non-executable 30-trading-minute prospective shadow",NseTradingCalendar2026.VERSION,HandbookSynergyEngine.VERSION,at=nowMs)
-            DiagnosticLog.log(appContext,"CHALLENGER","opened non-executable shadow • ${setup.symbol} • ${setup.strategyId} • resolve=${Instant.ofEpochMilli(resolveAt).atZone(ist)}")
+            val defs=(strategyCatalog?:strategyCatalogClient.embedded()).strategies.associateBy{it.id}
+            val weight=1.0/components.size.coerceAtLeast(1)
+            val rows=components.map{cid->
+                StrategyLearningEventEntity.from(StrategyLearningObservation(
+                    eventId="SHV2|${x.id}|$cid",strategyId=cid,strategyName=defs[cid]?.name?:setup.strategyName,
+                    symbol=setup.symbol,direction=setup.direction,source=StrategyLearningSource.SHADOW_V2,
+                    sessionBand=x.sessionBand,regime=runCatching{MarketRegime.valueOf(x.regime)}.getOrDefault(MarketRegime.MIXED),
+                    rawScore=setup.rawScore,calibratedProbabilityPct=setup.calibratedProbabilityPct,entryPrice=setup.entryPrice,
+                    targetPct=setup.targetPct,stopPct=setup.stopPct,openedAt=nowMs,closedAt=0L,sessionDate=sessionDate.toString(),
+                    outcome=StrategyLearningOutcome.PENDING,returnPct=0.0,rMultiple=0.0,researchSignature=setup.researchSignature,
+                    componentStrategyIds=components,clusterKey=sessionDate.toString()+"|"+x.sessionBand+"|"+x.regime+"|"+setup.direction.name,
+                    sampleWeight=weight,legacy=false
+                ))
+            }
+            strategyLearning.insertEvents(rows)
+            prefs.appendDecisionSnapshot(setup,"CHALLENGER_SHADOW","Non-executable target/stop/EOD shadow; same objective as LIVE",NseTradingCalendar2026.VERSION,HandbookSynergyEngine.VERSION,at=nowMs)
+            DiagnosticLog.log(appContext,"CHALLENGER","opened v2 comparable shadow • ${setup.symbol} • ${setup.strategyId} • resolve EOD=${Instant.ofEpochMilli(resolveAt).atZone(ist)}")
         }
         return added
     }
 
     suspend fun resolveChallengerShadows():Int{
         val all=prefs.loadChallengerShadows(4000).toMutableList();val nowMs=System.currentTimeMillis()
-        val due=all.filter{it.outcome==ChallengerShadowOutcome.PENDING&&nowMs>=it.resolveAt+5L*60_000L}
+        val due=all.filter{it.outcome==ChallengerShadowOutcome.PENDING&&nowMs>=it.resolveAt}
         if(due.isEmpty())return 0
         if(!ensureAutomationAuthentication())return 0
         val token=accessToken();if(token.isBlank())return 0
         var changed=0
         val updated=all.map{r->
             if(r !in due)return@map r
-            val target=Instant.ofEpochMilli(r.resolveAt).atZone(ist)
-            val from=target.minusMinutes(5).format(dateTimeFmt);val to=target.plusMinutes(15).format(dateTimeFmt)
-            val candles=runCatching{groww.getHistoricalCandles(token,r.symbol,from,to,"5minute")}.getOrNull()
-            val candle=candles?.sortedBy{it.epochSeconds}?.firstOrNull{it.epochSeconds*1000L>=r.resolveAt}
-            if(candle==null){
-                val age=nowMs-r.resolveAt
-                if(age>24L*60*60_000L){
-                    changed++;DiagnosticLog.log(appContext,"CHALLENGER-RESOLVE","UNRESOLVED_DATA • ${r.symbol} • scheduled=$target")
-                    r.copy(outcome=ChallengerShadowOutcome.UNRESOLVED_DATA,resolvedAt=nowMs,note="No historical 5-minute bar at/after scheduled horizon; latest/current quote was intentionally not substituted.")
-                }else r
+            // Old v1.6 shadows are retained as legacy evidence only; resolve them with their old horizon
+            // semantics so migration is backwards compatible, but they can never create a v1.7 Champion.
+            if(r.modelVersion!=StrategyGovernanceV2.MODEL_VERSION||r.targetPct<=0.0||r.stopPct<=0.0){
+                val target=Instant.ofEpochMilli(r.resolveAt).atZone(ist)
+                val from=target.minusMinutes(5).format(dateTimeFmt);val to=target.plusMinutes(15).format(dateTimeFmt)
+                val candles=runCatching{groww.getHistoricalCandles(token,r.symbol,from,to,"5minute")}.getOrNull()
+                val candle=candles?.sortedBy{it.epochSeconds}?.firstOrNull{it.epochSeconds*1000L>=r.resolveAt}
+                if(candle==null){
+                    if(nowMs-r.resolveAt>24L*60*60_000L){
+                        changed++;r.copy(outcome=ChallengerShadowOutcome.UNRESOLVED_DATA,resolvedAt=nowMs,note="Legacy shadow unresolved; excluded from v1.7 Champion evidence.")
+                    }else r
+                }else{
+                    val px=candle.close
+                    val ret=if(r.entryPrice<=0.0)0.0 else if(r.direction==TradeDirection.LONG)(px/r.entryPrice-1.0)*100.0 else (r.entryPrice/px-1.0)*100.0
+                    val out=if(ret>0.0)ChallengerShadowOutcome.WIN else ChallengerShadowOutcome.LOSS
+                    changed++;r.copy(outcome=out,resolvedAt=nowMs,horizonPrice=px,returnPct=ret,note="Legacy 30-minute shadow; weak prior only.")
+                }
             }else{
-                val px=candle.close
-                val ret=if(r.entryPrice<=0.0)0.0 else if(r.direction==TradeDirection.LONG)(px/r.entryPrice-1.0)*100.0 else (r.entryPrice/px-1.0)*100.0
-                val out=if(ret>0.0)ChallengerShadowOutcome.WIN else ChallengerShadowOutcome.LOSS
-                changed++;DiagnosticLog.log(appContext,"CHALLENGER-RESOLVE","$out • ${r.symbol} • ${r.strategyId} • horizon=${"%.2f".format(px)} • return=${"%+.2f".format(ret)}%")
-                r.copy(outcome=out,resolvedAt=nowMs,horizonPrice=px,returnPct=ret,note="Resolved from first historical 5-minute bar at/after the frozen scheduled horizon.")
+                val opened=Instant.ofEpochMilli(r.openedAt).atZone(ist)
+                val end=Instant.ofEpochMilli(r.resolveAt).atZone(ist)
+                val candles=runCatching{groww.getHistoricalCandles(token,r.symbol,opened.format(dateTimeFmt),end.format(dateTimeFmt),"1minute")}.getOrNull()
+                if(candles.isNullOrEmpty()){
+                    if(nowMs-r.resolveAt>24L*60*60_000L){
+                        val invalid=r.copy(outcome=ChallengerShadowOutcome.UNRESOLVED_DATA,resolvedAt=nowMs,note="No historical 1-minute replay; excluded from learning.")
+                        for(cid in r.componentStrategyIds.ifEmpty{listOf(r.strategyId)}){
+                            val old=strategyLearning.recentEvents(20_000).firstOrNull{it.eventId=="SHV2|${r.id}|$cid"}?.toDomain()?:continue
+                            strategyLearning.upsertEvent(StrategyLearningEventEntity.from(old.copy(closedAt=nowMs,outcome=StrategyLearningOutcome.INVALID)))
+                        }
+                        changed++;invalid
+                    }else r
+                }else{
+                    val targetPx=if(r.direction==TradeDirection.LONG)r.entryPrice*(1+r.targetPct/100.0) else r.entryPrice*(1-r.targetPct/100.0)
+                    val stopPx=if(r.direction==TradeDirection.LONG)r.entryPrice*(1-r.stopPct/100.0) else r.entryPrice*(1+r.stopPct/100.0)
+                    var out:ChallengerShadowOutcome?=null
+                    var exit=candles.last().close
+                    for(c in candles.sortedBy{it.epochSeconds}){
+                        val th=if(r.direction==TradeDirection.LONG)c.high>=targetPx else c.low<=targetPx
+                        val sh=if(r.direction==TradeDirection.LONG)c.low<=stopPx else c.high>=stopPx
+                        when{
+                            th&&sh->{out=ChallengerShadowOutcome.AMBIGUOUS;exit=c.close;break}
+                            sh->{out=ChallengerShadowOutcome.LOSS;exit=stopPx;break}
+                            th->{out=ChallengerShadowOutcome.WIN;exit=targetPx;break}
+                        }
+                    }
+                    if(out==null)out=ChallengerShadowOutcome.LOSS // same LIVE objective: target not reached by EOD is LOSS
+                    val ret=if(r.entryPrice<=0.0||exit<=0.0)0.0 else if(r.direction==TradeDirection.LONG)(exit/r.entryPrice-1.0)*100.0 else (r.entryPrice/exit-1.0)*100.0
+                    val learningOutcome=when(out){
+                        ChallengerShadowOutcome.WIN->StrategyLearningOutcome.WIN
+                        ChallengerShadowOutcome.LOSS->StrategyLearningOutcome.LOSS
+                        ChallengerShadowOutcome.AMBIGUOUS->StrategyLearningOutcome.AMBIGUOUS
+                        else->StrategyLearningOutcome.INVALID
+                    }
+                    val comparable=learningOutcome==StrategyLearningOutcome.WIN||learningOutcome==StrategyLearningOutcome.LOSS
+                    val recentMap=strategyLearning.recentEvents(20_000).associateBy{it.eventId}
+                    for(cid in r.componentStrategyIds.ifEmpty{listOf(r.strategyId)}){
+                        val eid="SHV2|${r.id}|$cid";val old=recentMap[eid]?.toDomain()?:continue
+                        val rm=if(r.stopPct>0.0)ret/r.stopPct else 0.0
+                        strategyLearning.upsertEvent(StrategyLearningEventEntity.from(old.copy(closedAt=nowMs,outcome=learningOutcome,returnPct=ret,rMultiple=rm)))
+                    }
+                    changed++
+                    DiagnosticLog.log(appContext,"CHALLENGER-RESOLVE","$out • ${r.symbol} • target/stop/EOD objective • return=${"%+.2f".format(ret)}% • comparable=$comparable")
+                    r.copy(outcome=out,resolvedAt=nowMs,horizonPrice=exit,returnPct=ret,
+                        note=if(comparable)"Resolved with same 1-minute target/stop/EOD objective as LIVE." else "Ambiguous 1-minute bar; excluded from learning.")
+                }
             }
         }
         if(changed>0)prefs.saveChallengerShadows(updated)
         return changed
     }
+
 
     suspend fun scanTradingStrategies(challengerOnly:Boolean=false,progress:suspend(String)->Unit={}):StrategyTournamentSummary=strategyMutex.withLock{
         prefs.markStrategyAttempt()
