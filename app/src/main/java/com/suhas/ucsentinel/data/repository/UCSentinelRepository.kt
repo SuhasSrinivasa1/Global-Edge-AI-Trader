@@ -1251,22 +1251,38 @@ class GlobalEdgeAITraderRepository(context:Context){
     suspend fun scanTradingStrategies(challengerOnly:Boolean=false,progress:suspend(String)->Unit={}):StrategyTournamentSummary=strategyMutex.withLock{
         prefs.markStrategyAttempt()
         val settings=prefs.loadSettings();require(settings.strategyTournamentEnabled){"Strategy tournament is disabled"}
-        require(ensureAutomationAuthentication()){ "Groww authentication is required. TOTP mode can renew automatically." }
+        require(ensureAutomationAuthentication()){"Groww authentication is required. TOTP mode can renew automatically."}
         if(strategyCatalog==null)runCatching{refreshStrategyCatalog(false)}
         val(bundle,active)=activeStrategyDefinitions(settings)
+        ensureStrategyLearningV2Migrated()
         val token=accessToken();val universe=if(instruments.cached().isEmpty())instruments.refresh() else instruments.cached()
+        val now=ZonedDateTime.now(ist);val date=now.toLocalDate()
+        val sessionBand=strategyGovernance.sessionBand(now.toLocalTime())
+        val currentRegime=currentStrategyRegime()
+        val roster=ensureDailyStrategyRoster(date,bundle.strategies,settings)
+        fun rosterDecision(id:String,direction:TradeDirection):StrategyRosterDecision?=
+            roster.firstOrNull{it.strategyId==id&&it.direction==direction&&it.sessionBand==sessionBand&&it.regime==currentRegime}
+                ?:roster.firstOrNull{it.strategyId==id&&it.direction==direction&&it.sessionBand==sessionBand&&it.regime==MarketRegime.MIXED}
+        fun rankStatus(status:StrategyStatus)=when(status){
+            StrategyStatus.CHAMPION->0
+            StrategyStatus.QUALIFIED->1
+            StrategyStatus.ACTIVE->2
+            StrategyStatus.CHALLENGER->3
+            StrategyStatus.PROBATION->4
+            StrategyStatus.SUSPENDED->5
+        }
+        fun bestDecision(setup:StrategySetup):StrategyRosterDecision?=
+            setup.componentStrategyIds.ifEmpty{listOf(setup.strategyId)}.mapNotNull{rosterDecision(it,setup.direction)}
+                .minWithOrNull(compareBy<StrategyRosterDecision>{rankStatus(it.status)}.thenByDescending{it.expectancyR}.thenByDescending{it.hitRatePct})
 
-        // FULL NSE universe: Groww's current instrument master is the authority. Every buy-allowed
-        // NSE CASH equity is screened in stage 1. There is no fixed mover/top-N sample.
         val cash=universe.filter{it.exchange=="NSE"&&it.segment=="CASH"&&it.instrumentType=="EQ"&&it.buyAllowed}.distinctBy{it.tradingSymbol}
         val carried=(lastSavedDualSummary()?.uc?.candidates.orEmpty()+lastSavedDualSummary()?.demand?.candidates.orEmpty()).map{it.symbol}.toSet()
         val existingLive=prefs.loadStrategyLive().toMutableList()
         val prioritySymbols=(carried+existingLive.map{it.setup.symbol}).toSet()
-        progress("Strategies: FULL NSE equity scan ${cash.size} stocks • ${active.size} rules • OHLC batches of 50")
+        progress("Strategies v2: FULL NSE ${cash.size} • ${active.size} research rules • context $sessionBand/${currentRegime.name}")
 
         data class Stage1(val instrument:Instrument,val movePct:Double,val rangePct:Double)
-        val stage1=mutableListOf<Stage1>()
-        val sessionOhlc=linkedMapOf<String,Ohlc>()
+        val stage1=mutableListOf<Stage1>();val sessionOhlc=linkedMapOf<String,Ohlc>()
         val chunks=cash.chunked(50)
         chunks.forEachIndexed{idx,batch->
             val map=runCatching{groww.getOhlcBatch(token,batch.map{it.tradingSymbol})}.getOrDefault(emptyMap())
@@ -1276,38 +1292,30 @@ class GlobalEdgeAITraderRepository(context:Context){
                 if(o.close<20.0||o.close>20_000.0||o.open<=0.0||o.high<=0.0||o.low<=0.0)return@forEach
                 val move=kotlin.math.abs(o.close/o.open-1.0)*100.0
                 val range=((o.high-o.low)/o.open*100.0).coerceAtLeast(0.0)
-                // Broad activity/entry prefilter, not ranking. Every match enters the deep queue.
-                // Priority names already LIVE or surfaced by UC/Demand are force-retained.
                 if(move>=0.15||range>=0.45||i.tradingSymbol in prioritySymbols)stage1+=Stage1(i,move,range)
             }
-            if(idx%10==9||idx==chunks.lastIndex)
-                progress("Strategies: full-universe OHLC ${minOf((idx+1)*50,cash.size)}/${cash.size} • entry-prefilter ${stage1.size}")
+            if(idx%10==9||idx==chunks.lastIndex)progress("Strategies v2: OHLC ${minOf((idx+1)*50,cash.size)}/${cash.size} • prefilter ${stage1.size}")
         }
 
-        // Historical candles are per-symbol, so deep work is a deterministic continuation queue rather
-        // than a random sample. Every qualifying stock is eventually processed; nothing is silently dropped.
-        // v1.6.1: 220/pass keeps the full-NSE rotation intact while finishing inside the 5-minute cadence.
-        // Deferred symbols remain in the deterministic cursor queue and are processed on later passes.
         val deepBudget=220
         val essential=stage1.filter{it.instrument.tradingSymbol in prioritySymbols}
         val rest=stage1.filterNot{it.instrument.tradingSymbol in prioritySymbols}.sortedBy{it.instrument.tradingSymbol}
         val cursor=if(rest.isEmpty())0 else prefs.strategyDeepScanCursor()%rest.size
         val rotated=if(rest.isEmpty())emptyList() else rest.drop(cursor)+rest.take(cursor)
-        val room=(deepBudget-essential.size).coerceAtLeast(0)
-        val chosenRest=rotated.take(room)
+        val chosenRest=rotated.take((deepBudget-essential.size).coerceAtLeast(0))
         val selected=(essential+chosenRest).distinctBy{it.instrument.tradingSymbol}
-        val nextCursor=if(rest.isEmpty())0 else (cursor+chosenRest.size)%rest.size
-        prefs.setStrategyDeepScanCursor(nextCursor)
+        if(rest.isNotEmpty())prefs.setStrategyDeepScanCursor((cursor+chosenRest.size)%rest.size)
         val deferred=(stage1.size-selected.size).coerceAtLeast(0)
-        progress("Strategies: deep scan ${selected.size}/${stage1.size} qualifying stocks • deferred ${deferred} queued, not sampled")
+        progress("Strategies v2: deep ${selected.size}/${stage1.size} • queued $deferred")
+
         val listingAge=newListingsCache.associate{it.symbol to it.daysListed}
         val industryBundle=withContext(Dispatchers.IO){runCatching{industryClient.load(false)}.getOrNull()}
         if(industryBundle!=null&&industryBundle.fetchedAt>0L)prefs.setSectorMapVersion(industryBundle.source+"@"+industryBundle.fetchedAt)
-        val governance=prefs.strategyPerformances(bundle.strategies,settings).associateBy{it.strategyId}
         val macroEvents=prefs.loadMacroEvents(1000)
-        val now=ZonedDateTime.now(ist);val date=now.toLocalDate();val start=date.atTime(9,15).format(dateTimeFmt);val end=now.plusMinutes(1).format(dateTimeFmt)
+        val historyStart=date.minusDays(12).atTime(9,15).format(dateTimeFmt)
+        val historyEnd=now.plusMinutes(1).format(dateTimeFmt)
         val quoteCache=mutableMapOf<String,Quote?>()
-        suspend fun quote(symbol:String):Quote? = if(quoteCache.containsKey(symbol))quoteCache[symbol] else runCatching{groww.getQuote(token,symbol)}.getOrNull().also{quoteCache[symbol]=it}
+        suspend fun quote(symbol:String):Quote?=if(quoteCache.containsKey(symbol))quoteCache[symbol] else runCatching{groww.getQuote(token,symbol)}.getOrNull().also{quoteCache[symbol]=it}
         fun spreadPct(q:Quote)=ExecutionQuality.spreadPct(q)
         fun hasBid(q:Quote)=ExecutionQuality.hasBid(q)
         fun hasAsk(q:Quote)=ExecutionQuality.hasAsk(q)
@@ -1317,246 +1325,235 @@ class GlobalEdgeAITraderRepository(context:Context){
             return raw.takeIf{it.isFinite()}?:0.0
         }
 
-        // First reconcile already-open recommendations. A recommendation never disappears because a later
-        // scan no longer ranks it; it stays LIVE until target, stop, invalidation, or end-of-day governance.
-        val closed=prefs.loadStrategyClosed(500).toMutableList()
+        // Reconcile the small diversified LIVE portfolio with 1-minute chronology.
+        val closed=prefs.loadStrategyClosed(1500).toMutableList()
         val surviving=mutableListOf<StrategyRecommendation>()
         val durableLearningUpdates=mutableListOf<Triple<StrategySetup,Double,Boolean>>()
         for(r in existingLive){
-            val opened=Instant.ofEpochMilli(r.openedAt).atZone(ist)
-            val openedDate=opened.toLocalDate()
-            val oldDay=openedDate<date
-            val q=quote(r.setup.symbol)
-            val currentPx=q?.lastPrice?.takeIf{it.isFinite()&&it>0.0}?:r.lastPrice
+            val opened=Instant.ofEpochMilli(r.openedAt).atZone(ist);val openedDate=opened.toLocalDate();val oldDay=openedDate<date
+            val q=quote(r.setup.symbol);val currentPx=q?.lastPrice?.takeIf{it.isFinite()&&it>0.0}?:r.lastPrice
             val target=if(r.setup.direction==TradeDirection.LONG)r.setup.entryPrice*(1+r.setup.targetPct/100.0) else r.setup.entryPrice*(1-r.setup.targetPct/100.0)
             val stop=if(r.setup.direction==TradeDirection.LONG)r.setup.entryPrice*(1-r.setup.stopPct/100.0) else r.setup.entryPrice*(1+r.setup.stopPct/100.0)
-            val pathEnd=if(oldDay) openedDate.atTime(15,31).atZone(ist) else now.plusMinutes(1)
-            val pathCandles=runCatching{groww.getHistoricalCandles(token,r.setup.symbol,opened.format(dateTimeFmt),pathEnd.format(dateTimeFmt),"5minute")}.getOrNull()
-            var pathStatus:StrategyRecommendationStatus?=null
-            var exitPx=if(oldDay)r.lastPrice else currentPx
+            val pathEnd=if(oldDay)openedDate.atTime(15,31).atZone(ist) else now.plusMinutes(1)
+            val pathCandles=runCatching{groww.getHistoricalCandles(token,r.setup.symbol,opened.format(dateTimeFmt),pathEnd.format(dateTimeFmt),"1minute")}.getOrNull()
+            var pathStatus:StrategyRecommendationStatus?=null;var ambiguous=false;var exitPx=if(oldDay)r.lastPrice else currentPx
             pathCandles?.sortedBy{it.epochSeconds}?.forEach{c->
-                if(pathStatus!=null||!c.high.isFinite()||!c.low.isFinite())return@forEach
-                val targetHit=if(r.setup.direction==TradeDirection.LONG)c.high>=target else c.low<=target
-                val stopHit=if(r.setup.direction==TradeDirection.LONG)c.low<=stop else c.high>=stop
-                when{
-                    targetHit&&stopHit->{pathStatus=StrategyRecommendationStatus.LOSS;exitPx=stop}
-                    stopHit->{pathStatus=StrategyRecommendationStatus.LOSS;exitPx=stop}
-                    targetHit->{pathStatus=StrategyRecommendationStatus.WIN;exitPx=target}
-                }
+                if(pathStatus!=null||ambiguous||!c.high.isFinite()||!c.low.isFinite())return@forEach
+                val th=if(r.setup.direction==TradeDirection.LONG)c.high>=target else c.low<=target
+                val sh=if(r.setup.direction==TradeDirection.LONG)c.low<=stop else c.high>=stop
+                when{th&&sh->{ambiguous=true;exitPx=c.close};sh->{pathStatus=StrategyRecommendationStatus.LOSS;exitPx=stop};th->{pathStatus=StrategyRecommendationStatus.WIN;exitPx=target}}
             }
             val eod=now.toLocalTime()>=LocalTime.of(15,30)
-            val status=pathStatus?:if(oldDay||eod)StrategyRecommendationStatus.LOSS else StrategyRecommendationStatus.LIVE
+            val status=when{
+                ambiguous->StrategyRecommendationStatus.INVALIDATED
+                pathStatus!=null->pathStatus!!
+                (oldDay||eod)&&pathCandles.isNullOrEmpty()->StrategyRecommendationStatus.INVALIDATED
+                oldDay||eod->StrategyRecommendationStatus.LOSS
+                else->StrategyRecommendationStatus.LIVE
+            }
             if(status==StrategyRecommendationStatus.LIVE){
-                val sp=q?.let(::spreadPct)?:r.spreadPct
-                surviving+=r.copy(lastSeenAt=System.currentTimeMillis(),lastPrice=currentPx,tradedValue=q?.let{it.volume*it.lastPrice}?:r.tradedValue,volume=q?.volume?:r.volume,spreadPct=sp)
+                surviving+=r.copy(lastSeenAt=System.currentTimeMillis(),lastPrice=currentPx,tradedValue=q?.let{it.volume*it.lastPrice}?:r.tradedValue,volume=q?.volume?:r.volume,spreadPct=q?.let(::spreadPct)?:r.spreadPct)
             }else{
-                if(pathStatus==null)exitPx=pathCandles?.lastOrNull()?.close?.takeIf{it.isFinite()&&it>0.0}?:r.lastPrice.takeIf{it.isFinite()&&it>0.0}?:currentPx
+                if(pathStatus==null&&!ambiguous)exitPx=pathCandles?.lastOrNull()?.close?.takeIf{it.isFinite()&&it>0.0}?:r.lastPrice.takeIf{it.isFinite()&&it>0.0}?:currentPx
                 val ret=returnPct(r.setup,exitPx)
-                val reason=when(status){
-                    StrategyRecommendationStatus.WIN->"Target reached"
-                    StrategyRecommendationStatus.LOSS->if(pathStatus==StrategyRecommendationStatus.LOSS)"Stop reached" else "Target not reached by session close"
-                    StrategyRecommendationStatus.EXPIRED->"Legacy expired call"
-                    else->"Closed"
+                val reason=when{
+                    ambiguous->"INVALID • target and stop in same 1-minute bar"
+                    pathCandles.isNullOrEmpty()->"INVALID • historical 1-minute replay unavailable"
+                    status==StrategyRecommendationStatus.WIN->"Target reached"
+                    pathStatus==StrategyRecommendationStatus.LOSS->"Stop reached"
+                    else->"Target not reached by session close"
                 }
                 val done=r.copy(lastSeenAt=System.currentTimeMillis(),lastPrice=exitPx,closedAt=System.currentTimeMillis(),exitPrice=exitPx,status=status,returnPct=ret,closeReason=reason,
                     tradedValue=q?.let{it.volume*it.lastPrice}?:r.tradedValue,volume=q?.volume?:r.volume,spreadPct=q?.let(::spreadPct)?:r.spreadPct)
                 closed.removeAll{it.id==done.id};closed.add(done)
-                if(status==StrategyRecommendationStatus.WIN||status==StrategyRecommendationStatus.LOSS)durableLearningUpdates+=Triple(r.setup,ret,status==StrategyRecommendationStatus.WIN)
+                if(status==StrategyRecommendationStatus.WIN||status==StrategyRecommendationStatus.LOSS){
+                    durableLearningUpdates+=Triple(r.setup,ret,status==StrategyRecommendationStatus.WIN)
+                    recordStrategyLearningV2(done)
+                }
             }
         }
 
         val rejectedBefore=prefs.loadRejectedShadows(2500).size
-        val rawSetups=mutableListOf<Pair<StrategySetup,Quote>>();var enriched=0;var quoteRejected=0;var historyFailed=0;var candleShort=0;var rulesMatched=0;var handbookCautions=0
+        val rawSetups=mutableListOf<Pair<StrategySetup,Quote>>()
+        var enriched=0;var quoteRejected=0;var historyFailed=0;var candleShort=0;var rulesMatched=0;var handbookCautions=0
+
         for((idx,row) in selected.withIndex()){
             val inst=row.instrument
-            val candleResult=runCatching{groww.getHistoricalCandles(token,inst.tradingSymbol,start,end,"5minute")}
-            if(candleResult.isFailure){historyFailed++;continue}
-            val candles=candleResult.getOrDefault(emptyList());if(candles.size<2){candleShort++;continue}
+            val allCandles=runCatching{groww.getHistoricalCandles(token,inst.tradingSymbol,historyStart,historyEnd,"5minute")}.getOrElse{historyFailed++;emptyList()}
+            if(allCandles.isEmpty())continue
+            val byDate=allCandles.sortedBy{it.epochSeconds}.groupBy{Instant.ofEpochSecond(it.epochSeconds).atZone(ist).toLocalDate()}
+            val candles=byDate[date].orEmpty()
+            if(candles.size<2){candleShort++;continue}
+            val priorDates=byDate.keys.filter{it<date}.sortedDescending()
+            val previousSessionClose=priorDates.firstOrNull()?.let{byDate[it]?.lastOrNull()?.close}
+            val slotIndex=candles.lastIndex
+            val slotVolumes=priorDates.take(8).mapNotNull{d->byDate[d]?.getOrNull(slotIndex)?.volume}.filter{it>0L}
 
             val evals=buildList{
                 for(def in active){
-                    if(challengerOnly && governance[def.id]?.status!=StrategyStatus.CHALLENGER)continue
-                    val e=strategyEngine.evaluate(def,candles)?:continue
+                    val e=strategyEngine.evaluate(def,candles,previousSessionClose,slotVolumes)?:continue
+                    val d=rosterDecision(def.id,e.direction)
+                    if(challengerOnly&&d?.status !in setOf(StrategyStatus.CHALLENGER,StrategyStatus.PROBATION))continue
                     add(def to e)
                 }
             }
-            if(evals.isEmpty()){
-                if(idx%25==24)progress("Strategies: deep rules ${idx+1}/${selected.size} • matches ${rulesMatched}")
-                continue
-            }
+            if(evals.isEmpty()){if(idx%25==24)progress("Strategies v2: rules ${idx+1}/${selected.size} • matches $rulesMatched");continue}
             rulesMatched+=evals.size
 
-            // Quote/depth is fetched only after at least one rule fires, preserving the shared Live Data budget.
             val q=quote(inst.tradingSymbol)?:continue;val sp=spreadPct(q);val tradedValue=q.volume*q.lastPrice
-            // Discovery visibility is intentionally broader than order execution. A usable live quote
-            // may enter research even when the two-sided book is incomplete; LIVE publication still
-            // re-checks ExecutionQuality.executableQuote below.
-            val researchQuoteReady=ExecutionQuality.discoveryQuote(q)
-            if(!researchQuoteReady){quoteRejected++;continue}
+            if(!ExecutionQuality.discoveryQuote(q)){quoteRejected++;continue}
             enriched++
 
             for((def,e) in evals){
-                val age=listingAge[inst.tradingSymbol];val boost=if(age!=null&&age<=settings.newListingDays)2.0 else 0.0
-                val rawScore=(e.score+boost).coerceAtMost(100.0)
-                val maturity=governance[def.id]?.status?:StrategyStatus.CHALLENGER
+                val age=listingAge[inst.tradingSymbol];val listingBoost=if(age!=null&&age<=settings.newListingDays)1.0 else 0.0
+                val rawScore=(e.score+listingBoost).coerceAtMost(100.0)
+                val d=rosterDecision(def.id,e.direction)
+                val maturity=d?.status?:StrategyStatus.CHALLENGER
                 val liquidity="₹${"%.1f".format(tradedValue/100000.0)}L traded • vol ${q.volume} • spread ${"%.2f".format(sp)}%"
                 val baseSetup=StrategySetup(inst.tradingSymbol,inst.name,def.id,def.name,e.direction,rawScore,q.lastPrice,e.targetPct,e.stopPct,
-                    e.evidence+" • "+liquidity+" • maturity "+maturity.name+(if(boost>0)" • new-listing context" else ""),age)
+                    e.evidence+" • "+liquidity+" • frozen maturity "+maturity.name,age,rawScore=rawScore,contextBand=sessionBand,contextRegime=currentRegime.name,componentStrategyIds=listOf(def.id))
                 fun reject(setup:StrategySetup,reason:String){recordRejectedStrategyShadow(setup,reason)}
                 if(e.targetPct<ExecutionQuality.MIN_PLAN_SEPARATION_PCT||e.stopPct<ExecutionQuality.MIN_PLAN_SEPARATION_PCT){reject(baseSetup,"PLAN_SEPARATION_GATE");continue}
                 if(e.direction==TradeDirection.SHORT&&(inst.series!="EQ"||!inst.sellAllowed)){reject(baseSetup,"SHORT_NOT_INTRADAY_ELIGIBLE");continue}
                 if(e.direction==TradeDirection.LONG&&!hasAsk(q)){reject(baseSetup,"NO_EXECUTABLE_ASK");continue}
                 if(e.direction==TradeDirection.SHORT&&!hasBid(q)){reject(baseSetup,"NO_EXECUTABLE_BID");continue}
-                val hb=handbookSynergy.evaluate(baseSetup,candles,q)
-                var setup=baseSetup.copy(score=hb.adjustedScore,evidence=baseSetup.evidence+" • "+hb.evidence,researchSignature=hb.signature,
-                    handbookQualityPct=hb.qualityPct,handbookPattern=hb.primaryPattern,handbookCombination=hb.combination)
 
+                val hb=handbookSynergy.evaluate(baseSetup,candles,q)
+                var setup=baseSetup.copy(score=hb.adjustedScore,rawScore=hb.adjustedScore,evidence=baseSetup.evidence+" • "+hb.evidence,researchSignature=hb.signature,
+                    handbookQualityPct=hb.qualityPct,handbookPattern=hb.primaryPattern,handbookCombination=hb.combination)
                 val sector=industryBundle?.let{evidenceFabric.sector(setup.symbol,setup.direction,it.bySymbol,sessionOhlc)}
                 if(sector!=null){
                     val adj=evidenceFabric.sectorAdjustment(sector)
-                    setup=setup.copy(score=(setup.score+adj).coerceIn(0.0,100.0),evidence=setup.evidence+
+                    setup=setup.copy(score=(setup.score+adj).coerceIn(0.0,100.0),rawScore=(setup.rawScore+adj).coerceIn(0.0,100.0),evidence=setup.evidence+
                         " • sector ${sector.industry} • peers ${sector.peersObserved} • breadth ${"%.0f".format(sector.directionalBreadthPct)}% • RS ${"%+.2f".format(sector.relativeStrengthPct)}%")
                     val eid=("SECTOR|"+setup.symbol+"|"+sector.observedAt).hashCode().toUInt().toString(16)
                     prefs.appendPointInTimeEvidence(PointInTimeEvidence("PIT-"+eid,setup.symbol,EvidenceKind.SECTOR,"NIFTY500 industry intelligence",
                         "industry=${sector.industry}; breadth=${sector.directionalBreadthPct}; relativeStrength=${sector.relativeStrengthPct}; peerConfirmed=${sector.peerConfirmed}",
                         sector.source,observedAt=sector.observedAt,effectiveAt=sector.observedAt,revisionId=eid,notes="Prospective sector snapshot"))
                 }
-
-                if(evidenceFabric.shouldHardWaitForMacro(now,macroEvents)){reject(setup,"MACRO_HARD_WAIT "+(evidenceFabric.macroRisk(now,macroEvents).second));continue}
+                if(evidenceFabric.shouldHardWaitForMacro(now,macroEvents)){reject(setup,"MACRO_HARD_WAIT "+evidenceFabric.macroRisk(now,macroEvents).second);continue}
                 val companyEvent=evidenceFabric.companyEventRisk(setup.symbol,System.currentTimeMillis(),macroEvents)
-                if(companyEvent!=null)setup=setup.copy(score=(setup.score-2.0).coerceAtLeast(0.0),evidence=setup.evidence+" • event-risk "+companyEvent.title)
-                // v1.6.1 separates recommendation quality from execution safety. Handbook execution
-                // hard-fails become a visible research caution + modest score penalty; LIVE publication
-                // still requires ExecutionQuality.executableQuote below, so unsafe orderability is not restored.
+                if(companyEvent!=null)setup=setup.copy(score=(setup.score-2.0).coerceAtLeast(0.0),rawScore=(setup.rawScore-2.0).coerceAtLeast(0.0),evidence=setup.evidence+" • event-risk "+companyEvent.title)
                 if(hb.hardFail){
-                    handbookCautions++
-                    val penalty=(hb.failedHardFilters.size*1.5).coerceIn(2.0,6.0)
-                    setup=setup.copy(score=(setup.score-penalty).coerceAtLeast(0.0),evidence=setup.evidence+
-                        " • EXECUTION CAUTION: "+hb.failedHardFilters.joinToString(",").take(160))
+                    handbookCautions++;val penalty=(hb.failedHardFilters.size*1.5).coerceIn(2.0,6.0)
+                    setup=setup.copy(score=(setup.score-penalty).coerceAtLeast(0.0),rawScore=(setup.rawScore-penalty).coerceAtLeast(0.0),
+                        evidence=setup.evidence+" • EXECUTION CAUTION: "+hb.failedHardFilters.joinToString(",").take(160))
                 }
-                if(setup.score<60.0){reject(setup,"RESEARCH_SCORE_FLOOR "+"%.1f".format(setup.score)+" < 60.0");continue}
+                if(setup.rawScore<60.0){reject(setup,"RESEARCH_RAW_FLOOR ${"%.1f".format(setup.rawScore)} < 60");continue}
                 rawSetups+=setup to q
             }
-            if(idx%25==24||idx==selected.lastIndex)progress("Strategies: deep rules ${idx+1}/${selected.size} • rule matches ${rulesMatched} • matched+quoted ${enriched}")
+            if(idx%25==24||idx==selected.lastIndex)progress("Strategies v2: deep rules ${idx+1}/${selected.size} • matches $rulesMatched • quoted $enriched")
         }
+
+        // Same-side ensemble: preserve component identity and give each component fractional credit later.
         val combined=rawSetups.groupBy{it.first.symbol to it.first.direction}.map{(_,pairs)->
-            val ranked=pairs.sortedByDescending{it.first.score};val primary=ranked.first();val agree=ranked.take(3)
-            ranked.drop(1).forEach{(setup,_)->recordRejectedStrategyShadow(setup,"SAME_SIDE_RULE_DEDUP stronger="+primary.first.strategyId)}
-            val names=agree.map{it.first.strategyName}.distinct();val boost=((names.size-1)*2.0).coerceAtMost(4.0)
-            primary.first.copy(strategyName=names.joinToString(" + "),score=(primary.first.score+boost).coerceAtMost(100.0),
-                evidence="${names.size} strategy confirmation • "+agree.joinToString(" | "){it.first.evidence.take(120)}) to primary.second
+            val ranked=pairs.sortedWith(compareBy<Pair<StrategySetup,Quote>>{rankStatus(rosterDecision(it.first.strategyId,it.first.direction)?.status?:StrategyStatus.CHALLENGER)}
+                .thenByDescending{it.first.rawScore})
+            val agree=ranked.take(3);val primary=agree.first()
+            val components=agree.map{it.first.strategyId}.distinct()
+            ranked.drop(3).forEach{(setup,_)->recordRejectedStrategyShadow(setup,"ENSEMBLE_COMPONENT_PRUNED")}
+            val d=bestDecision(primary.first.copy(componentStrategyIds=components))
+            val baseProb=d?.let{strategyGovernance.calibrate(primary.first.rawScore,it)}?:45.0
+            val matureConfirmations=components.count{cid->rosterDecision(cid,primary.first.direction)?.let(strategyGovernance::productionEligible)==true}
+            val probability=(baseProb+(matureConfirmations-1).coerceAtLeast(0)*0.5).coerceAtMost(85.0)
+            val expR=strategyGovernance.expectedR(probability,primary.first.targetPct,primary.first.stopPct)
+            val names=agree.map{it.first.strategyName}.distinct()
+            primary.first.copy(strategyName=names.joinToString(" + "),score=probability,calibratedProbabilityPct=probability,expectedR=expR,
+                componentStrategyIds=components,evidence="${names.size} component ensemble • calibrated target-before-stop ${"%.1f".format(probability)}% • exp ${"%+.2f".format(expR)}R • "+agree.joinToString(" | "){it.first.evidence.take(100)}) to primary.second
         }
+
         val directionalWinners=combined.groupBy{it.first.symbol}.mapNotNull{(_,v)->
-            val winner=v.maxByOrNull{it.first.score}
-            if(winner!=null)v.filterNot{it===winner}.forEach{(setup,_)->recordRejectedStrategyShadow(setup,"DIRECTION_CONFLICT_LOST winner="+winner.first.direction.name)}
+            val winner=v.maxWithOrNull(compareBy<Pair<StrategySetup,Quote>>{it.first.expectedR}.thenBy{it.first.calibratedProbabilityPct})
+            if(winner!=null)v.filterNot{it===winner}.forEach{(setup,_)->recordRejectedStrategyShadow(setup,"DIRECTION_CONFLICT_LOST v2 expR")}
             winner
-        }.sortedByDescending{it.first.score}
-        val researchTop=directionalWinners.filter{it.first.score>=68.0}
-        val confirmedTop=directionalWinners.filter{it.first.score>=72.0}
-        val legacyRecall=directionalWinners.filter{it.first.score>=60.0&&it.first.score<68.0}.take(20)
-        if(now.toLocalTime()<LocalTime.of(15,0)){
-            legacyRecall.forEach{(setup,_)->
-                openChallengerShadow(setup.copy(
-                    strategyId="legacy_recall:"+setup.strategyId,
-                    strategyName="LEGACY RECALL • "+setup.strategyName,
-                    evidence="High-recall shadow lane • "+setup.evidence
-                ))
-            }
-        }
-        directionalWinners.filter{it.first.score<72.0}.forEach{(setup,_)->recordRejectedStrategyShadow(setup,"BELOW_LIVE_THRESHOLD "+"%.1f".format(setup.score)+" < 72.0")}
+        }.sortedWith(compareByDescending<Pair<StrategySetup,Quote>>{it.first.expectedR}.thenByDescending{it.first.calibratedProbabilityPct})
+
         val researchPreview=directionalWinners.take(100)
-        val sessionClosed=closed.filter{r->
-            runCatching{Instant.ofEpochMilli(r.openedAt).atZone(ist).toLocalDate()==date}.getOrDefault(false)
-        }
+        val sessionClosed=closed.filter{runCatching{Instant.ofEpochMilli(it.openedAt).atZone(ist).toLocalDate()==date}.getOrDefault(false)}
         val scoredSessionClosed=sessionClosed.filter{it.status==StrategyRecommendationStatus.WIN||it.status==StrategyRecommendationStatus.LOSS}
         val sessionColdStrategies=scoredSessionClosed.groupBy{it.setup.strategyId}.mapNotNull{(id,rows)->
-            val wins=rows.count{it.status==StrategyRecommendationStatus.WIN}
-            val avg=if(rows.isEmpty())0.0 else rows.map{it.returnPct}.average()
+            val wins=rows.count{it.status==StrategyRecommendationStatus.WIN};val avg=if(rows.isEmpty())0.0 else rows.map{it.returnPct}.average()
             id.takeIf{AutomationPolicy.strategySessionCold(rows.size,wins,avg)}
         }.toSet()
         val usedSessionSymbols=(surviving.map{it.setup.symbol}+sessionClosed.map{it.setup.symbol}).toMutableSet()
-        val existingKeys=surviving.map{"${it.setup.symbol}|${it.setup.direction.name}"}.toMutableSet();val newlyOpened=mutableListOf<StrategySetup>()
-        var challengerOpened=0
-        var challengerPublished=0
-        var activePublished=0
-        var championPublished=0
-        var probationBlocked=0
-        var suspendedBlocked=0
-        var churnBlocked=0
-        var liveExecutionRejected=0
-        // No arbitrary publication cap: every score-qualified candidate that passes hard
-        // execution/risk/governance gates may become visible in LIVE. Manual PLACE ORDER is still required.
+        val existingKeys=surviving.map{"${it.setup.symbol}|${it.setup.direction.name}"}.toMutableSet()
+        val newlyOpened=mutableListOf<StrategySetup>()
+        var shadowsOpened=0;var maturityBlocked=0;var qualityBlocked=0;var churnBlocked=0;var executionBlocked=0;var correlationBlocked=0
+
+        // Exploration is always non-executable shadow. Production roster never promotes intraday.
         if(now.toLocalTime()<LocalTime.of(15,10)){
-            // 68-71.9 remains research/shadow only. A 72+ Challenger may now become LIVE
-            // only after the same hard handbook/macro/liquidity/execution gates as mature
-            // strategies. The Challenger shadow lane still runs independently for evidence.
-            for((setup,_) in researchTop){
-                val status=governance[setup.strategyId]?.status?:StrategyStatus.CHALLENGER
-                if(status==StrategyStatus.CHALLENGER&&openChallengerShadow(setup))challengerOpened++
+            directionalWinners.filter{pair->
+                val d=bestDecision(pair.first);d==null||!strategyGovernance.productionEligible(d)
+            }.take(20).forEach{(setup,_)->if(openChallengerShadow(setup))shadowsOpened++}
+        }
+
+        val productionCandidates=if(challengerOnly)emptyList() else directionalWinners.filter{(setup,_)->
+            val d=bestDecision(setup)
+            val maturityOk=d?.let(strategyGovernance::productionEligible)==true
+            val qualityOk=when(d?.status){
+                StrategyStatus.CHAMPION->setup.calibratedProbabilityPct>=52.0&&setup.expectedR>=0.05
+                StrategyStatus.QUALIFIED->setup.calibratedProbabilityPct>=55.0&&setup.expectedR>=0.10
+                else->false
             }
-            for((setup,q) in confirmedTop){
-                val status=governance[setup.strategyId]?.status?:StrategyStatus.CHALLENGER
-                if(setup.strategyId in sessionColdStrategies){
-                    probationBlocked++
-                    recordRejectedStrategyShadow(setup,"SESSION_COLD_PROBATION")
-                    if(status==StrategyStatus.CHALLENGER)openChallengerShadow(setup)
-                    continue
-                }
-                if(setup.symbol in usedSessionSymbols){
-                    churnBlocked++
-                    recordRejectedStrategyShadow(setup,"SESSION_SYMBOL_CHURN_BLOCK")
-                    continue
-                }
-                if(!ExecutionQuality.executableQuote(q)){
-                    liveExecutionRejected++
-                    recordRejectedStrategyShadow(setup,"LIVE_EXECUTION_GATE")
-                    continue
-                }
-                if(status==StrategyStatus.SUSPENDED){
-                    suspendedBlocked++
-                    recordRejectedStrategyShadow(setup,"GOVERNANCE_SUSPENDED")
-                    continue
-                }
-                if(status==StrategyStatus.PROBATION){
-                    probationBlocked++
-                    recordRejectedStrategyShadow(setup,"GOVERNANCE_PROBATION")
-                    continue
+            if(!maturityOk)maturityBlocked++
+            else if(!qualityOk)qualityBlocked++
+            maturityOk&&qualityOk
+        }
+
+        // Portfolio selector: publish only the best diversified opportunities, not dozens of correlated clones.
+        val maxNew=settings.strategyTopCandidates.coerceIn(3,10)
+        val directionCap=kotlin.math.ceil(maxNew*0.65).toInt().coerceAtLeast(1)
+        val dirCounts=mutableMapOf<TradeDirection,Int>()
+        val sectorCounts=mutableMapOf<String,Int>()
+        surviving.forEach{r->
+            dirCounts[r.setup.direction]=(dirCounts[r.setup.direction]?:0)+1
+            val sec=industryBundle?.bySymbol?.get(r.setup.symbol).orEmpty().ifBlank{"UNKNOWN"}
+            sectorCounts[sec]=(sectorCounts[sec]?:0)+1
+        }
+
+        if(now.toLocalTime()<LocalTime.of(15,10)){
+            for((setup,q) in productionCandidates){
+                if(newlyOpened.size>=maxNew)break
+                val components=setup.componentStrategyIds.ifEmpty{listOf(setup.strategyId)}
+                if(components.any{it in sessionColdStrategies}){qualityBlocked++;recordRejectedStrategyShadow(setup,"SESSION_KILL_SWITCH");continue}
+                if(setup.symbol in usedSessionSymbols){churnBlocked++;recordRejectedStrategyShadow(setup,"SESSION_SYMBOL_CHURN_BLOCK");continue}
+                if(!ExecutionQuality.executableQuote(q)){executionBlocked++;recordRejectedStrategyShadow(setup,"LIVE_EXECUTION_GATE");continue}
+                val sector=industryBundle?.bySymbol?.get(setup.symbol).orEmpty().ifBlank{"UNKNOWN"}
+                if((sectorCounts[sector]?:0)>=2||(dirCounts[setup.direction]?:0)>=directionCap){
+                    correlationBlocked++;recordRejectedStrategyShadow(setup,"PORTFOLIO_CORRELATION_CAP");continue
                 }
                 val key="${setup.symbol}|${setup.direction.name}"
-                if(key in existingKeys){recordRejectedStrategyShadow(setup,"ALREADY_LIVE_DUPLICATE");continue}
-                val maturityNote="maturity "+status.name+(if(status==StrategyStatus.CHALLENGER)" • prospective shadow active" else "")
-                val liveSetup=setup.copy(evidence=setup.evidence+" • "+maturityNote)
-                val sp=spreadPct(q);val id="${date}|$key|${setup.strategyId}"
-                surviving+=StrategyRecommendation(id,liveSetup,System.currentTimeMillis(),System.currentTimeMillis(),q.lastPrice,tradedValue=q.volume*q.lastPrice,volume=q.volume,spreadPct=sp)
+                if(key in existingKeys)continue
+                val d=bestDecision(setup)?:continue
+                val liveSetup=setup.copy(evidence=setup.evidence+" • PRODUCTION "+d.status.name+" • frozen before open • LIVE/shadow objectives aligned")
+                val id="${date}|$key|${setup.strategyId}|V2"
+                surviving+=StrategyRecommendation(id,liveSetup,System.currentTimeMillis(),System.currentTimeMillis(),q.lastPrice,tradedValue=q.volume*q.lastPrice,volume=q.volume,spreadPct=spreadPct(q))
                 existingKeys+=key;usedSessionSymbols+=setup.symbol;newlyOpened+=liveSetup
-                when(status){
-                    StrategyStatus.CHALLENGER->challengerPublished++
-                    StrategyStatus.ACTIVE->activePublished++
-                    StrategyStatus.CHAMPION->championPublished++
-                    else->{}
-                }
-                prefs.appendDecisionSnapshot(liveSetup,"LIVE_PUBLISHED",status.name,NseTradingCalendar2026.VERSION,HandbookSynergyEngine.VERSION,
-                    sectorIndustry=industryBundle?.bySymbol?.get(setup.symbol).orEmpty(),macroRisk=evidenceFabric.macroRisk(now,macroEvents).first?.name?:"NONE")
-                DiagnosticLog.log(appContext,"DECISION","LIVE_PUBLISHED • ${setup.symbol} • ${setup.strategyId} • $status")
+                dirCounts[setup.direction]=(dirCounts[setup.direction]?:0)+1;sectorCounts[sector]=(sectorCounts[sector]?:0)+1
+                prefs.appendDecisionSnapshot(liveSetup,"LIVE_PUBLISHED_V2",d.status.name+" • expR="+("%+.2f".format(setup.expectedR)),NseTradingCalendar2026.VERSION,HandbookSynergyEngine.VERSION,
+                    sectorIndustry=sector,macroRisk=evidenceFabric.macroRisk(now,macroEvents).first?.name?:"NONE")
+                DiagnosticLog.log(appContext,"DECISION","LIVE_PUBLISHED_V2 • ${setup.symbol} • ${setup.strategyId} • ${d.status} • p=${"%.1f".format(setup.calibratedProbabilityPct)}% • expR=${"%+.2f".format(setup.expectedR)}")
             }
-        }else confirmedTop.forEach{(setup,_)->recordRejectedStrategyShadow(setup,"LATE_SESSION_GATE >=15:10")}
+        }else productionCandidates.forEach{(setup,_)->recordRejectedStrategyShadow(setup,"LATE_SESSION_GATE >=15:10")}
+
         prefs.saveStrategyLedger(surviving,closed)
         durableLearningUpdates.forEach{(setup,ret,win)->
             runCatching{prefs.updateStrategyResult(setup.strategyId,setup.strategyName,ret,win)}
-                .onFailure{DiagnosticLog.log(appContext,"STRATEGY","Learning update failed after durable close for ${setup.symbol}",it)}
+                .onFailure{DiagnosticLog.log(appContext,"STRATEGY","Legacy aggregate compatibility update failed for ${setup.symbol}",it)}
         }
         prefs.pruneMemory(settings.memoryRetentionDays.coerceAtLeast(30))
 
-        val perfs=prefs.strategyPerformances(bundle.strategies,settings);val insights=prefs.championResearchInsights(bundle.strategies,6)
+        val perfs=strategyGovernance.performanceRows(bundle.strategies,roster,sessionBand,currentRegime)
+        val insights=strategyGovernance.insights(roster,sessionBand,currentRegime,8)
         val rejectedAfter=prefs.loadRejectedShadows(2500).size;val rejectedAdded=(rejectedAfter-rejectedBefore).coerceAtLeast(0)
-        val champions=perfs.count{it.status==StrategyStatus.CHAMPION};val suspended=perfs.count{it.status==StrategyStatus.SUSPENDED}
+        val champions=perfs.count{it.status==StrategyStatus.CHAMPION};val qualified=perfs.count{it.status==StrategyStatus.QUALIFIED}
+        val v2Count=strategyLearning.eventCount()
         val summary=StrategyTournamentSummary(System.currentTimeMillis(),cash.size,active.size,enriched,researchPreview.map{it.first},active,perfs,bundle.version,
-            (if(challengerOnly)"SHADOW RUN • " else "")+"FULL NSE ${cash.size} • OHLC all • entry-prefilter ${stage1.size} • deep ${selected.size} • queued ${deferred} • ${active.size} rules • HB 100/50/50 • ${enriched} matched+quoted • ${quoteRejected} liquidity rejects • ${historyFailed} history failures • ${candleShort} short histories • ${rulesMatched} rule matches • HB cautions ${handbookCautions} • ${confirmedTop.size} score>=72 • ${liveExecutionRejected} execution rejects • ${probationBlocked} probation/session-cold blocked • ${suspendedBlocked} suspended blocked • ${churnBlocked} same-session churn blocked • no publication cap • ${surviving.size} LIVE • ${newlyOpened.size} new [C ${challengerPublished} / A ${activePublished} / CH ${championPublished}] • challenger shadows +$challengerOpened • CHAMP ${champions} • SUSP ${suspended} • rejected+journal ${rejectedAdded}",
-            insights,rejectedAfter,HandbookSynergyEngine.VERSION)
-        DiagnosticLog.log(appContext,"STRATEGY","${summary.message}")
+            (if(challengerOnly)"SHADOW RUN • " else "")+"V2 FULL NSE ${cash.size} • context $sessionBand/${currentRegime.name} • deep ${selected.size} queued $deferred • matches $rulesMatched • calibrated production ${productionCandidates.size} • execution blocks $executionBlocked • maturity blocks $maturityBlocked • quality blocks $qualityBlocked • churn $churnBlocked • correlation $correlationBlocked • ${surviving.size} LIVE • ${newlyOpened.size} new • shadows +$shadowsOpened • CHAMP $champions • QUAL $qualified • Room events $v2Count • rejected+journal $rejectedAdded",
+            insights,rejectedAfter,HandbookSynergyEngine.VERSION,date.toString(),"$sessionBand/${currentRegime.name}",v2Count)
+        DiagnosticLog.log(appContext,"STRATEGY-V2",summary.message)
         prefs.saveStrategySummary(summary);prefs.clearStrategyError();summary
     }
-
 
     suspend fun refreshGlobalMappings(force:Boolean=false):Int{
         val settings=prefs.loadSettings();val now=System.currentTimeMillis();val last=prefs.lastGlobalMappingRefreshAt()
