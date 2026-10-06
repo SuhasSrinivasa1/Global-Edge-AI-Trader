@@ -65,6 +65,91 @@ object MultifyTrustPolicy {
         trustedPackage.isNotBlank() && trustedPackage==packageName
 }
 
+data class MultifyParsedNotification(
+    val eventType:MultifyEventType,
+    val direction:String,
+    val symbol:String,
+    val price:Double,
+    val instrumentClass:MultifyInstrumentClass,
+    val noise:Boolean,
+    val raw:String
+)
+
+object MultifyNotificationParser {
+    private val EXIT_RE=Regex("\\b(EXIT|CLOSE|CLOSED|BOOK\\s+PROFIT|BOOKED\\s+PROFIT|SQUARE\\s*OFF|TARGET\\s+HIT|STOP\\s*LOSS\\s+HIT|SL\\s+HIT)\\b",RegexOption.IGNORE_CASE)
+    private val LONG_RE=Regex("\\b(BUY|LONG|ENTRY\\s+LONG|GO\\s+LONG|BOUGHT)\\b",RegexOption.IGNORE_CASE)
+    private val SHORT_RE=Regex("\\b(SELL|SHORT|ENTRY\\s+SHORT|GO\\s+SHORT|SOLD)\\b",RegexOption.IGNORE_CASE)
+    private val STATUS_PHRASES=listOf(
+        "signal capture active","listening for paid multify","notification access","alerts enabled",
+        "shadow + app-owned live monitors ready","monitoring notifications","service running","capture service"
+    )
+    private val BLOCKED=setOf(
+        "BUY","SELL","LONG","SHORT","ENTRY","EXIT","CLOSE","CLOSED","NSE","BSE","CASH","EQUITY","INTRADAY","TARGET","STOP","LOSS",
+        "PRICE","CALL","MULTIFY","CMP","ABOVE","BELOW","BOOK","PROFIT","SIGNAL","CAPTURE","ACTIVE","LISTENING","PAID","ALERT","ALERTS",
+        "APP","OWNED","LIVE","MONITORS","READY","SERVICE","RUNNING","TRADER","TRADE"
+    )
+
+    fun parse(title:String,parts:List<String>,ongoing:Boolean=false):MultifyParsedNotification{
+        val raw=(listOf(title)+parts).map{it.trim()}.filter{it.isNotBlank()}.distinct().joinToString(" • ")
+        if(raw.isBlank())return MultifyParsedNotification(MultifyEventType.UNKNOWN,"","",0.0,MultifyInstrumentClass.UNKNOWN,true,raw)
+        val upper=raw.uppercase(Locale.ROOT)
+        val exit=EXIT_RE.containsMatchIn(raw)
+        val longHit=LONG_RE.containsMatchIn(raw)
+        val shortHit=SHORT_RE.containsMatchIn(raw)
+        val eventType=when{
+            exit->MultifyEventType.EXIT
+            longHit&&!shortHit->MultifyEventType.ENTRY_LONG
+            shortHit&&!longHit->MultifyEventType.ENTRY_SHORT
+            else->MultifyEventType.UNKNOWN
+        }
+        val direction=when(eventType){
+            MultifyEventType.ENTRY_LONG->"BUY"
+            MultifyEventType.ENTRY_SHORT->"SELL"
+            MultifyEventType.EXIT->"EXIT"
+            else->""
+        }
+        val symbol=parseSymbol(upper,direction)
+        val price=parsePrice(raw)
+        val clazz=classifyInstrument(upper,symbol)
+        val lower=raw.lowercase(Locale.ROOT)
+        val explicitStatus=STATUS_PHRASES.any{it in lower}
+        val actionable=eventType!=MultifyEventType.UNKNOWN&&symbol.isNotBlank()&&clazz==MultifyInstrumentClass.EQUITY
+        val noise=(explicitStatus&&!actionable)||(ongoing&&!actionable)
+        return MultifyParsedNotification(eventType,direction,symbol,price,clazz,noise,raw)
+    }
+
+    private fun parsePrice(raw:String):Double{
+        val patterns=listOf(
+            Regex("(?:@|\\bAT\\b|\\bPRICE\\b|\\bCMP\\b|\\bLTP\\b|\\bENTRY\\b)\\s*[:=\\-]?\\s*₹?\\s*(\\d+(?:\\.\\d+)?)",RegexOption.IGNORE_CASE),
+            Regex("₹\\s*(\\d+(?:\\.\\d+)?)")
+        )
+        return patterns.asSequence().mapNotNull{it.find(raw)?.groupValues?.getOrNull(1)?.toDoubleOrNull()}.firstOrNull()?:0.0
+    }
+
+    private fun parseSymbol(upper:String,direction:String):String{
+        val candidates=mutableListOf<String>()
+        fun add(re:Regex){re.find(upper)?.groupValues?.getOrNull(1)?.let(candidates::add)}
+        if(direction=="BUY")add(Regex("\\b(?:BUY|LONG|ENTRY\\s+LONG|GO\\s+LONG|BOUGHT)\\b\\s*[:=\\-]?\\s*(?:NSE[:\\s-]*)?([A-Z][A-Z0-9&.\\-]{1,19})"))
+        if(direction=="SELL")add(Regex("\\b(?:SELL|SHORT|ENTRY\\s+SHORT|GO\\s+SHORT|SOLD)\\b\\s*[:=\\-]?\\s*(?:NSE[:\\s-]*)?([A-Z][A-Z0-9&.\\-]{1,19})"))
+        add(Regex("\\bNSE[:\\s-]+([A-Z][A-Z0-9&.\\-]{1,19})\\b"))
+        add(Regex("\\b(?:STOCK|SYMBOL|SCRIP|TICKER)\\s*[:=\\-]\\s*([A-Z][A-Z0-9&.\\-]{1,19})\\b"))
+        add(Regex("[#$]([A-Z][A-Z0-9&.\\-]{1,19})\\b"))
+        add(Regex("\\b([A-Z][A-Z0-9&.\\-]{1,19})\\b\\s*(?:@|\\bAT\\b|\\bCMP\\b|₹)"))
+        if(direction=="EXIT")add(Regex("\\b(?:EXIT|CLOSE|CLOSED|SQUARE\\s*OFF)\\b\\s*[:=\\-]?\\s*(?:NSE[:\\s-]*)?([A-Z][A-Z0-9&.\\-]{1,19})\\b"))
+        add(Regex("\\b([A-Z][A-Z0-9&.\\-]{1,19})\\b\\s*[:=\\-]?\\s*\\b(?:BUY|SELL|LONG|SHORT|EXIT|CLOSE)\\b"))
+        return candidates.map{it.trim('.', '-', ' ')}.firstOrNull{
+            it.length in 2..20&&it !in BLOCKED&&!it.endsWith("CE")&&!it.endsWith("PE")&&!it.all(Char::isDigit)
+        }.orEmpty()
+    }
+
+    private fun classifyInstrument(upper:String,symbol:String):MultifyInstrumentClass{
+        val derivative=Regex("\\b(OPTION|OPTIONS|FUT|FUTURE|FUTURES|CE|PE|NIFTY|BANKNIFTY|FINNIFTY|MIDCPNIFTY|SENSEX|CRUDE|GOLD|SILVER|COMMODITY)\\b").containsMatchIn(upper) ||
+            Regex("\\b\\d{4,6}\\s*(CE|PE)\\b").containsMatchIn(upper)||Regex("\\b[A-Z]{2,15}\\d{2,6}(CE|PE)\\b").containsMatchIn(upper)
+        if(derivative)return MultifyInstrumentClass.DERIVATIVE_OR_NON_EQUITY
+        return if(symbol.isNotBlank())MultifyInstrumentClass.EQUITY else MultifyInstrumentClass.UNKNOWN
+    }
+}
+
 object MultifyEventStore {
     private const val PREFS="global_edge_multify_events"
     private const val KEY="events_json"
@@ -178,35 +263,25 @@ class MultifyNotificationService:NotificationListenerService(){
         val listenerReceivedAt=System.currentTimeMillis()
         val n=sbn.notification?:return
         val title=n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty().trim()
-        val text=listOf(
-            n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty(),
-            n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty(),
-            n.extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
-        ).firstOrNull{it.isNotBlank()}.orEmpty().trim()
-        val pkg=sbn.packageName.orEmpty()
-        val combined="$title $text"
-        // v1.6.8: package-name matches may be captured for research, but they are never
-        // automatically trusted for live execution. LIVE requires an explicit in-app trust action
-        // that pins the exact detected Android package name.
-        if(!MultifyEventStore.observeCandidatePackage(applicationContext,pkg))return
-        if(combined.isBlank())return
-
-        val upper=combined.uppercase(Locale.ROOT)
-        val exit=Regex("\\b(EXIT|CLOSE|CLOSED|BOOK\\s+PROFIT|BOOKED\\s+PROFIT|SQUARE\\s*OFF|TARGET\\s+HIT|STOP\\s*LOSS\\s+HIT|SL\\s+HIT)\\b",RegexOption.IGNORE_CASE).containsMatchIn(combined)
-        val direction=Regex("\\b(BUY|SELL)\\b",RegexOption.IGNORE_CASE).find(combined)?.groupValues?.getOrNull(1)?.uppercase(Locale.ROOT).orEmpty()
-        val eventType=when{
-            exit->MultifyEventType.EXIT
-            direction=="BUY"->MultifyEventType.ENTRY_LONG
-            direction=="SELL"->MultifyEventType.ENTRY_SHORT
-            else->MultifyEventType.UNKNOWN
+        val parts=mutableListOf<String>()
+        listOf(Notification.EXTRA_TEXT,Notification.EXTRA_BIG_TEXT,Notification.EXTRA_SUB_TEXT,Notification.EXTRA_SUMMARY_TEXT,Notification.EXTRA_INFO_TEXT).forEach{k->
+            n.extras.getCharSequence(k)?.toString()?.takeIf{it.isNotBlank()}?.let(parts::add)
         }
-        val symbol=parseSymbol(combined,direction)
-        val instrumentClass=classifyInstrument(upper,symbol)
-        val price=Regex("(?:@|\\bAT\\b|\\bPRICE\\b|\\bCMP\\b)\\s*[:=-]?\\s*₹?\\s*(\\d+(?:\\.\\d+)?)",RegexOption.IGNORE_CASE)
-            .find(combined)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?:0.0
+        n.extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.forEach{it?.toString()?.takeIf{v->v.isNotBlank()}?.let(parts::add)}
+        n.tickerText?.toString()?.takeIf{it.isNotBlank()}?.let(parts::add)
+        n.actions?.mapNotNull{it.title?.toString()}?.filter{it.isNotBlank()}?.let(parts::addAll)
+        val pkg=sbn.packageName.orEmpty()
+        if(!MultifyEventStore.observeCandidatePackage(applicationContext,pkg))return
+        val parsed=MultifyNotificationParser.parse(title,parts,sbn.isOngoing||(n.flags and Notification.FLAG_ONGOING)!=0)
+        if(parsed.raw.isBlank())return
+        if(parsed.noise){
+            DiagnosticLog.log(applicationContext,"MULTIFY-PARSER","ignored non-signal/status notification • package="+pkg+" • "+parsed.raw.take(180))
+            return
+        }
+        val text=parts.distinct().joinToString(" • ")
         val event=MultifyEvent(
             id=MultifyEventStore.idFor(pkg,sbn.postTime,title,text),capturedAt=sbn.postTime,packageName=pkg,title=title.take(160),text=text.take(900),
-            direction=if(eventType==MultifyEventType.EXIT)"EXIT" else direction,symbol=symbol,signalPrice=price,eventType=eventType,instrumentClass=instrumentClass,
+            direction=parsed.direction,symbol=parsed.symbol,signalPrice=parsed.price,eventType=parsed.eventType,instrumentClass=parsed.instrumentClass,
             listenerReceivedAt=listenerReceivedAt,parsedAt=System.currentTimeMillis()
         )
         if(MultifyEventStore.capture(applicationContext,event)){
@@ -227,25 +302,5 @@ class MultifyNotificationService:NotificationListenerService(){
         }
     }
 
-    private fun classifyInstrument(upper:String,symbol:String):MultifyInstrumentClass{
-        val derivative=Regex("\\b(OPTION|OPTIONS|FUT|FUTURE|FUTURES|CE|PE|NIFTY|BANKNIFTY|FINNIFTY|MIDCPNIFTY|SENSEX|CRUDE|GOLD|SILVER|COMMODITY)\\b").containsMatchIn(upper) ||
-            Regex("\\b\\d{4,6}\\s*(CE|PE)\\b").containsMatchIn(upper) || Regex("\\b[A-Z]{2,15}\\d{2,6}(CE|PE)\\b").containsMatchIn(upper)
-        if(derivative)return MultifyInstrumentClass.DERIVATIVE_OR_NON_EQUITY
-        if(symbol.isNotBlank())return MultifyInstrumentClass.EQUITY
-        return MultifyInstrumentClass.UNKNOWN
-    }
 
-    private fun parseSymbol(raw:String,direction:String):String{
-        val u=raw.uppercase(Locale.ROOT)
-        val candidates=mutableListOf<String>()
-        if(direction.isNotBlank()){
-            Regex("\\b$direction\\b\\s*[:=-]?\\s*(?:NSE[:\\s-]*)?([A-Z][A-Z0-9&.-]{1,19})").find(u)?.groupValues?.getOrNull(1)?.let(candidates::add)
-        }
-        Regex("\\bNSE[:\\s-]+([A-Z][A-Z0-9&.-]{1,19})\\b").find(u)?.groupValues?.getOrNull(1)?.let(candidates::add)
-        Regex("\\b(?:STOCK|SYMBOL|SCRIP)\\s*[:=-]\\s*([A-Z][A-Z0-9&.-]{1,19})\\b").find(u)?.groupValues?.getOrNull(1)?.let(candidates::add)
-        Regex("\\b(?:EXIT|CLOSE|CLOSED|SQUARE\\s*OFF)\\b\\s*[:=-]?\\s*(?:NSE[:\\s-]*)?([A-Z][A-Z0-9&.-]{1,19})\\b").find(u)?.groupValues?.getOrNull(1)?.let(candidates::add)
-        Regex("\\b([A-Z][A-Z0-9&.-]{1,19})\\b\\s*[:=-]?\\s*\\b(?:EXIT|CLOSE|CLOSED|SQUARE\\s*OFF)\\b").find(u)?.groupValues?.getOrNull(1)?.let(candidates::add)
-        val blocked=setOf("BUY","SELL","EXIT","CLOSE","CLOSED","NSE","CASH","EQUITY","INTRADAY","TARGET","STOP","LOSS","PRICE","CALL","MULTIFY","CMP","ABOVE","BELOW","BOOK","PROFIT")
-        return candidates.firstOrNull{it !in blocked && !it.endsWith("CE") && !it.endsWith("PE")}.orEmpty()
-    }
 }
