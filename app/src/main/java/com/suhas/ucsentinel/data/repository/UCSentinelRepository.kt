@@ -28,6 +28,7 @@ class GlobalEdgeAITraderRepository(context:Context){
         const val MULTIFY_CAPITAL_BUDGET=200_000.0
         const val MULTIFY_DAILY_NET_TARGET=5_000.0
         const val MULTIFY_ESTIMATED_COST_RATE_PER_LEG=0.00075
+        const val MANUAL_MULTIFY_SOURCE="manual:in-app"
     }
     private data class MultifyLiveSubmission(
         val referenceId:String,
@@ -95,6 +96,25 @@ class GlobalEdgeAITraderRepository(context:Context){
     fun multifyStockProfile(symbol:String):MultifyStockProfile = buildMultifyStockProfile(symbol.trim().uppercase())
     fun multifyProfiles(limit:Int=40):List<MultifyStockProfile> = MultifyEventStore.recent(appContext,1000).map{it.symbol}.filter{it.isNotBlank()}.distinct().take(limit).map{buildMultifyStockProfile(it)}.filter{it.samples>0||it.exitFallSamples>0}
     fun multifyDashboard():MultifyDashboard = buildMultifyDashboard()
+
+    suspend fun submitManualMultifyEvent(symbol:String,eventType:MultifyEventType,signalPrice:Double=0.0):MultifyDecision?{
+        val normalizedSymbol=symbol.trim().uppercase()
+        require(normalizedSymbol.matches(Regex("""[A-Z][A-Z0-9&.-]{1,19}"""))){"Enter a valid NSE cash-equity symbol."}
+        require(eventType in setOf(MultifyEventType.ENTRY_LONG,MultifyEventType.ENTRY_SHORT,MultifyEventType.EXIT)){"Manual event must be BUY, SELL or EXIT."}
+        require(signalPrice.isFinite()&&signalPrice>=0.0){"Signal price must be zero/blank or a positive number."}
+        val now=System.currentTimeMillis()
+        val action=when(eventType){MultifyEventType.ENTRY_LONG->"BUY";MultifyEventType.ENTRY_SHORT->"SELL";MultifyEventType.EXIT->"EXIT";else->"UNKNOWN"}
+        val event=MultifyEvent(
+            id=MultifyEventStore.idFor(MANUAL_MULTIFY_SOURCE,now,"Manual Multify $action","$normalizedSymbol|$signalPrice"),
+            capturedAt=now,packageName=MANUAL_MULTIFY_SOURCE,title="Manual Multify $action",
+            text="$action $normalizedSymbol"+(if(signalPrice>0.0)" @ $signalPrice" else ""),
+            direction=action,symbol=normalizedSymbol,signalPrice=signalPrice,eventType=eventType,
+            instrumentClass=MultifyInstrumentClass.EQUITY,listenerReceivedAt=now,parsedAt=now
+        )
+        require(MultifyEventStore.capture(appContext,event)){"This manual event was already captured. Try again."}
+        DiagnosticLog.log(appContext,"MULTIFY-MANUAL","captured $action $normalizedSymbol • signalPrice=$signalPrice • same processing pipeline")
+        return processMultifyEvent(event.id)
+    }
     fun saveTradingStaticIp(value:String){ /* v1.2.8: route is intentionally pinned in this build */ }
     suspend fun currentPublicIpv4():String=withContext(Dispatchers.IO){
         val connection=(URL("https://api.ipify.org").openConnection() as HttpURLConnection).apply{
@@ -1822,7 +1842,7 @@ class GlobalEdgeAITraderRepository(context:Context){
         DiagnosticLog.log(appContext,"MULTIFY-SHADOW","OPEN ${row.side} ${row.symbol} • wave ${row.wave} • qty ${row.quantity} • ₹${"%.0f".format(row.allocatedCapital)} • ${row.strategyTag} • score ${"%.1f".format(row.score)}")
         if(prefs.loadSettings().multifyLiveTradingEnabled){
             val sourcePackage=MultifyEventStore.find(appContext,eventId)?.packageName.orEmpty()
-            if(!MultifyEventStore.sourceTrustedForLive(appContext,sourcePackage)){
+            if(sourcePackage!=MANUAL_MULTIFY_SOURCE&&!MultifyEventStore.sourceTrustedForLive(appContext,sourcePackage)){
                 val shadow=row.copy(liveExecutionNote="LIVE BLOCKED: source package is not explicitly trusted for execution")
                 multifyTrading.upsertTrade(shadow)
                 DiagnosticLog.log(appContext,"MULTIFY-LIVE","ENTRY BLOCKED ${row.symbol} • untrusted source package=$sourcePackage")
