@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -26,6 +26,19 @@ fun MultifyCompactScreen(state:UiState,vm:MainViewModel,padding:PaddingValues){
     val evaluated=events.count{it.evaluation!="PENDING"}
     val positive=events.count{it.evaluation in setOf("EDGE_POSITIVE","EXIT_FALL_EDGE")}
     val netColor=if(dash.todayNet>=0.0)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+    var manualSymbol by remember{mutableStateOf("")}
+    var manualPriceText by remember{mutableStateOf("")}
+    var manualResult by remember{mutableStateOf("")}
+    fun submitManual(type:MultifyEventType){
+        val symbol=manualSymbol.trim().uppercase(Locale.ROOT)
+        val price=manualPriceText.trim().takeIf{it.isNotBlank()}?.toDoubleOrNull()
+        if(symbol.isBlank()){manualResult="Enter an NSE symbol first.";return}
+        if(manualPriceText.isNotBlank()&&(price==null||price<0.0)){manualResult="Signal price must be blank or a valid positive number.";return}
+        vm.submitManualMultifySignal(symbol,type,price?:0.0){ok,message->
+            manualResult=message
+            if(ok&&type!=MultifyEventType.EXIT)manualSymbol=symbol
+        }
+    }
     LazyColumn(
         Modifier.fillMaxSize().padding(padding).padding(horizontal=14.dp),
         verticalArrangement=Arrangement.spacedBy(10.dp),
@@ -39,6 +52,29 @@ fun MultifyCompactScreen(state:UiState,vm:MainViewModel,padding:PaddingValues){
                         Text("Immediate equity reaction • stock-specific wave memory • shadow-first learning",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Text(if(state.multifyListenerEnabled)"LISTENING" else "OFF",color=if(state.multifyListenerEnabled)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,fontWeight=FontWeight.Bold)
+                }
+            }
+        }
+        item{
+            ElevatedCard(Modifier.fillMaxWidth()){
+                Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+                    Text("MANUAL MULTIFY ENTRY",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)
+                    Text("Use this when you want to enter the Multify call yourself. BUY / SELL / EXIT enters the same event → quote → strategy → Shadow → risk/reconciliation pipeline as a captured notification; it is not a raw-order shortcut.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(
+                        value=manualSymbol,onValueChange={manualSymbol=it.uppercase(Locale.ROOT).take(20)},
+                        label={Text("NSE symbol (example: TIMEX)")},singleLine=true,modifier=Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value=manualPriceText,onValueChange={manualPriceText=it.filter{c->c.isDigit()||c=='.'}.take(12)},
+                        label={Text("Multify signal price (optional)")},singleLine=true,modifier=Modifier.fillMaxWidth()
+                    )
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                        Button(onClick={submitManual(MultifyEventType.ENTRY_LONG)},enabled=!state.busy&&state.authenticated,modifier=Modifier.weight(1f)){Text("BUY / LONG")}
+                        OutlinedButton(onClick={submitManual(MultifyEventType.ENTRY_SHORT)},enabled=!state.busy&&state.authenticated,modifier=Modifier.weight(1f)){Text("SELL / SHORT")}
+                    }
+                    Button(onClick={submitManual(MultifyEventType.EXIT)},enabled=!state.busy&&state.authenticated,modifier=Modifier.fillMaxWidth()){Text("EXIT / BOOK PROFIT")}
+                    Text("Manual events are explicitly user-originated. Notification LIVE execution still requires the exact trusted Multify package; all other LIVE gates remain unchanged.",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.primary)
+                    if(manualResult.isNotBlank())Text(manualResult,style=MaterialTheme.typography.labelSmall,color=if(state.error==null)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -186,7 +222,9 @@ fun MultifyCompactScreen(state:UiState,vm:MainViewModel,padding:PaddingValues){
                             Text(e.eventType.name.replace('_',' '),color=if(e.eventType in setOf(MultifyEventType.ENTRY_SHORT,MultifyEventType.EXIT))MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,fontWeight=FontWeight.SemiBold)
                         }
                         Text(formatIstTimestamp(e.capturedAt)+(if(e.signalPrice>0)" • signal ₹${"%.2f".format(e.signalPrice)}" else "")+" • ${e.instrumentClass}",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("source ${e.packageName} • ${if(e.packageName==state.multifyTrustedPackage&&state.multifyTrustedPackage.isNotBlank())"TRUSTED FOR LIVE" else "RESEARCH ONLY"}",style=MaterialTheme.typography.labelSmall,color=if(e.packageName==state.multifyTrustedPackage&&state.multifyTrustedPackage.isNotBlank())MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        val manualSource=e.packageName=="manual:in-app"
+                        val trustedSource=e.packageName==state.multifyTrustedPackage&&state.multifyTrustedPackage.isNotBlank()
+                        Text("source ${e.packageName} • ${if(manualSource)"IN-APP MANUAL" else if(trustedSource)"TRUSTED FOR LIVE" else "RESEARCH ONLY"}",style=MaterialTheme.typography.labelSmall,color=if(manualSource||trustedSource)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         if(e.decisionCompletedAt>0L){
                             val notificationToDecision=(e.decisionCompletedAt-e.capturedAt).coerceAtLeast(0L)
                             val quoteLatency=if(e.quoteReceivedAt>0L)(e.quoteReceivedAt-e.capturedAt).coerceAtLeast(0L) else -1L
