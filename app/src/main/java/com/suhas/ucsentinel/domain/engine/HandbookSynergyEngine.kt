@@ -101,12 +101,16 @@ class HandbookSynergyEngine {
         filters+=fe(48,null);filters+=fe(49,null);filters+=fe(50,true,note="strategy-decay gate applied by Champion governance")
 
         val hardFails=filters.filter{it.hardFail&&it.passed==false}.map{it.name};val evaluated=filters.count{it.passed!=null};val unavailable=filters.size-evaluated;val passCount=filters.count{it.passed==true}
-        val contextPct=if(evaluated==0)50.0 else passCount*100.0/evaluated
+        // v1.7: unavailable intelligence is neutral, never a hidden confidence boost.
+        // Every unavailable filter contributes 0.5 rather than disappearing from the denominator.
+        val contextPct=((passCount+unavailable*0.5)/filters.size*100.0).coerceIn(0.0,100.0)
+        val coverage=evaluated.toDouble()/filters.size
+        val uncertaintyPenalty=((1.0-coverage)*3.0).coerceIn(0.0,3.0)
         val patternQuality=compatible.firstOrNull()?.quality?:0;val oppositePenalty=if(opposing.firstOrNull()?.quality==2&&patternQuality==0)-3.0 else 0.0
         val patternAdj=when(patternQuality){2->3.0;1->1.5;else->0.0};val comboAdj=if(combo!="Base")2.0 else 0.0;val contextAdj=((contextPct-60.0)*0.10).coerceIn(-7.0,5.0)
-        val adjusted=(setup.score+patternAdj+comboAdj+contextAdj+oppositePenalty).coerceIn(0.0,100.0);val anchors=handbookAnchors(setup)
+        val adjusted=(setup.score+patternAdj+comboAdj+contextAdj+oppositePenalty-uncertaintyPenalty).coerceIn(0.0,100.0);val anchors=handbookAnchors(setup)
         val signature=setup.strategyId+"|"+direction.name+"|"+primary.replace(" ","_")+"|"+combo.replace(" ","_")
-        val evidence="HB#"+anchors.joinToString(",")+" • candle "+primary+" • combo "+combo+" • filters "+passCount+"/"+evaluated+" pass ("+unavailable+" unavailable) • quality "+"%.0f".format(contextPct)
+        val evidence="HB#"+anchors.joinToString(",")+" • candle "+primary+" • combo "+combo+" • filters "+passCount+"/"+evaluated+" pass ("+unavailable+" unavailable, neutral) • quality "+"%.0f".format(contextPct)+" • coverage "+"%.0f".format(coverage*100)+"%"
         return Result(adjusted,contextPct,hardFails.isNotEmpty(),primary,combo,anchors,signature,evidence,hardFails,evaluated,unavailable)
     }
 
