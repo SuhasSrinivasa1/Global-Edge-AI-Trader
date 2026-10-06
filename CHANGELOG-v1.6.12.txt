@@ -1,0 +1,8 @@
+Global Edge AI Trader v1.6.12
+
+- Adds a MANUAL MULTIFY ENTRY section for NSE cash-equity BUY/LONG, SELL/SHORT and EXIT/BOOK PROFIT signals.
+- Manual submissions are stored as explicit in-app Multify events and run through the same processMultifyEvent pipeline as notification signals.
+- Manual input is not a raw broker-order shortcut: session, authentication, NSE instrument eligibility, quote, strategy decision, Shadow, execution, broker reconciliation, margin, static-IP, loss/profit locks and exit management remain in force.
+- Only explicit in-app manual events bypass notification-package trust. Notification-originated LIVE execution still requires the exact user-trusted Multify Android package.
+- Preserves the v1.6.11 immediate in-process notification path with WorkManager as delayed durable fallback.
+- Preserves persistent learning vault, scanner watchdog, broker reconciliation, emergency flatten, daily LIVE reset, latency tracking, Bayesian/recency Multify Champion logic and counterfactual replay.
