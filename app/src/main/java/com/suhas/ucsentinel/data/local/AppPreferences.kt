@@ -654,6 +654,17 @@ class AppPreferences(private val context:Context){
     fun saveListingFeedHealth(h:FeedHealth){prefs.edit().putString("listing_feed_health",JSONObject().put("state",h.state.name).put("itemCount",h.itemCount).put("lastAttemptAt",h.lastAttemptAt).put("lastSuccessAt",h.lastSuccessAt).put("message",h.message).toString()).apply()}
     fun listingFeedHealth():FeedHealth{val raw=prefs.getString("listing_feed_health",null)?:return FeedHealth();return runCatching{val j=JSONObject(raw);FeedHealth(runCatching{FeedHealthState.valueOf(j.optString("state"))}.getOrDefault(FeedHealthState.NEVER_LOADED),j.optInt("itemCount"),j.optLong("lastAttemptAt"),j.optLong("lastSuccessAt"),j.optString("message"))}.getOrDefault(FeedHealth())}
 
+    fun saveThreePmPrep(dateKey:String,candidates:List<Candidate>,at:Long=System.currentTimeMillis()){
+        val a=JSONArray();candidates.take(40).forEach{a.put(candidateToJson(it,false))}
+        prefs.edit().putString("uc_three_pm_prep_v170_"+dateKey,a.toString()).putLong("uc_three_pm_prep_at_v170",at).putString("uc_three_pm_prep_date_v170",dateKey).apply()
+    }
+    fun threePmPrep(dateKey:String):List<Candidate>{
+        val raw=prefs.getString("uc_three_pm_prep_v170_"+dateKey,null)?:return emptyList()
+        return candidatesFromArray(runCatching{JSONArray(raw)}.getOrElse{JSONArray()},ScannerSection.UC_CONTINUATION,false)
+    }
+    fun lastThreePmPrepAt():Long=prefs.getLong("uc_three_pm_prep_at_v170",0L)
+    fun threePmPrepDate():String=prefs.getString("uc_three_pm_prep_date_v170","").orEmpty()
+
     fun saveFreezeRecord(dateKey:String,section:ScannerSection,candidates:List<Candidate>,outcome:FreezeOutcome,sourceScanAt:Long,message:String,frozenAt:Long=System.currentTimeMillis()){
         val arr=JSONArray();candidates.forEach{arr.put(candidateToJson(it,true))};val meta=JSONObject().put("dateIso",dateKey).put("section",section.name).put("outcome",outcome.name).put("frozenAt",frozenAt).put("sourceScanAt",sourceScanAt).put("message",message)
         prefs.edit().putString("frozen_${section.name}_$dateKey",arr.toString()).putString("freeze_meta_${section.name}_$dateKey",meta.toString()).apply()
