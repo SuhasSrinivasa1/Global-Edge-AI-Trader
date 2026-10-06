@@ -41,6 +41,10 @@ class GlobalEdgeAITraderRepository(context:Context){
     private val appContext=context.applicationContext
     private val secureStore=SecureCredentialStore(context)
     private val prefs=AppPreferences(context)
+    private val strategyDb=StrategyLearningDatabase.get(appContext)
+    private val strategyLearning=strategyDb.dao()
+    private val strategyGovernance=StrategyGovernanceV2()
+    private val regimeClassifier=MarketRegimeClassifier()
     private val learningVault=PersistentLearningVault(appContext)
     private val groww=GrowwClient()
     private val news=ExchangeNewsClient()
@@ -638,41 +642,117 @@ class GlobalEdgeAITraderRepository(context:Context){
 
     private fun activeStrategyDefinitions(settings:AppSettings):Pair<StrategyCatalogClient.Bundle,List<TradingStrategyDefinition>>{
         val bundle=strategyCatalog?:strategyCatalogClient.embedded().also{strategyCatalog=it}
-        val today=LocalDate.now(ist);val wf=java.time.temporal.WeekFields.ISO
-        fun weekKey(d:LocalDate)=d.get(wf.weekBasedYear()).toString()+"-W"+d.get(wf.weekOfWeekBasedYear()).toString().padStart(2,'0')
-        val thisWeek=weekKey(today);val perfs=prefs.strategyPerformances(bundle.strategies,settings).associateBy{it.strategyId}
-        val suspended=bundle.strategies.filter{perfs[it.id]?.status==StrategyStatus.SUSPENDED}.map{it.id}.toSet()
-        val closed=prefs.loadStrategyClosed(2000);val byId=closed.associateBy{"STRATEGY|"+it.id}
-        val buckets=mutableMapOf<String,MutableList<Pair<Boolean,Double>>>()
-        prefs.loadAutopsies(2000).filter{it.engineLabel=="STRATEGY"}.forEach{a->
-            val r=byId[a.sourceId]?:return@forEach;val key=r.setup.strategyId+"|"+r.setup.direction.name+"|"+a.regime.name
-            buckets.getOrPut(key){mutableListOf()}+=((r.status==StrategyRecommendationStatus.WIN) to r.returnPct)
-        }
-        val regimeProtected=buckets.entries.filter{(_,rows)->rows.size>=4&&rows.count{it.first}*100.0/rows.size>=50.0&&rows.map{it.second}.average()>0.0}
-            .map{it.key.substringBefore("|")}.filterNot{suspended.contains(it)}.toSet()
-        val champions=bundle.strategies.filter{perfs[it.id]?.status==StrategyStatus.CHAMPION&&it.id !in suspended}.sortedByDescending{it.priority}
-        val championIds=champions.map{it.id}.toSet()
-        val saved=prefs.loadStrategySummary();val savedDate=saved?.generatedAt?.takeIf{it>0L}?.let{Instant.ofEpochMilli(it).atZone(ist).toLocalDate()}
-        val savedIds=if(savedDate!=null&&weekKey(savedDate)==thisWeek)saved?.activeStrategies.orEmpty().map{it.id}else emptyList()
-        val savedPreferred=savedIds.mapNotNull{id->bundle.strategies.firstOrNull{it.id==id}}
-            .filter{it.id !in suspended&&(perfs[it.id]?.status!=StrategyStatus.PROBATION||it.id in regimeProtected)}
-        val pool=bundle.strategies.filter{it.id !in championIds&&it.id !in suspended&&(perfs[it.id]?.status!=StrategyStatus.PROBATION||it.id in regimeProtected)}
-            .sortedByDescending{it.priority}
-        val weeklyOffset=((today.get(wf.weekOfWeekBasedYear())-1)%maxOf(1,pool.size))
-        val rotated=if(pool.isEmpty())emptyList() else pool.drop(weeklyOffset)+pool.take(weeklyOffset)
-        val time=ZonedDateTime.now(ist).toLocalTime()
-        val sessionKinds=when{
-            time<LocalTime.of(10,0)->setOf("ORB_RVOL","GAP_GO","VWAP_RECLAIM","VOLUME_BREAKOUT","ATR_BREAKOUT","PD_FVG_SWEEP")
-            time<LocalTime.of(14,15)->setOf("VWAP_PULLBACK","TREND_PULLBACK","EMA_CROSS","MACD","DONCHIAN","BOLL_SQUEEZE","RSI2_TREND","SUPPORT_RESISTANCE")
-            else->setOf("VOLUME_BREAKOUT","VWAP_RECLAIM","TREND_PULLBACK","ADX_TREND","ATR_BREAKOUT","SUPPORT_RESISTANCE","ENGULFING","THREE_SOLDIERS")
-        }
-        val sessionPreferred=rotated.filter{it.kind in sessionKinds}
-        val sessionOther=rotated.filterNot{it.kind in sessionKinds}
-        val active=(champions+sessionPreferred+savedPreferred+sessionOther).distinctBy{it.id}.take(settings.strategyActiveCount.coerceIn(16,24))
-        val sessionBand=when{time<LocalTime.of(10,0)->"OPEN";time<LocalTime.of(14,15)->"MID";else->"LATE"}
-        DiagnosticLog.log(appContext,"STRATEGY-WEEKLY","week="+thisWeek+" • band="+sessionBand+" • active="+active.size+" • preferred="+sessionPreferred.size+" • champions="+champions.size+" • suspended="+suspended.size+" • regime-protected="+regimeProtected.size)
+        // v1.7: the research engine evaluates the whole compact catalogue. Catalogue priority and
+        // hard-coded OPEN/MID/LATE families no longer decide production eligibility; the frozen
+        // contextual roster does that from historical evidence.
+        val active=bundle.strategies.take(24)
+        DiagnosticLog.log(appContext,"STRATEGY-V2","research rules="+active.size+" • production eligibility comes only from frozen contextual roster")
         return bundle to active
     }
+
+    private suspend fun ensureStrategyLearningV2Migrated(){
+        if(prefs.strategyV2Migrated())return
+        val closed=prefs.loadStrategyClosed(1500)
+        val autopsyBySource=prefs.loadAutopsies(2000).associateBy{it.sourceId}
+        val rows=mutableListOf<StrategyLearningEventEntity>()
+        for(r in closed){
+            if(r.status!=StrategyRecommendationStatus.WIN&&r.status!=StrategyRecommendationStatus.LOSS)continue
+            val setup=r.setup
+            val components=setup.componentStrategyIds.ifEmpty{listOf(setup.strategyId)}.distinct()
+            val weight=1.0/components.size.coerceAtLeast(1)
+            val opened=Instant.ofEpochMilli(r.openedAt).atZone(ist)
+            val band=strategyGovernance.sessionBand(opened.toLocalTime())
+            val regime=autopsyBySource["STRATEGY|"+r.id]?.regime?:MarketRegime.MIXED
+            val outcome=if(r.status==StrategyRecommendationStatus.WIN)StrategyLearningOutcome.WIN else StrategyLearningOutcome.LOSS
+            val names=(strategyCatalog?:strategyCatalogClient.embedded()).strategies.associateBy{it.id}
+            for(cid in components){
+                val o=StrategyLearningObservation(
+                    eventId="LEGACY|"+r.id+"|"+cid,strategyId=cid,strategyName=names[cid]?.name?:setup.strategyName,
+                    symbol=setup.symbol,direction=setup.direction,source=StrategyLearningSource.LEGACY_LIVE,
+                    sessionBand=band,regime=regime,rawScore=setup.rawScore.takeIf{it>0.0}?:setup.score,
+                    calibratedProbabilityPct=setup.calibratedProbabilityPct,entryPrice=setup.entryPrice,targetPct=setup.targetPct,stopPct=setup.stopPct,
+                    openedAt=r.openedAt,closedAt=r.closedAt,sessionDate=opened.toLocalDate().toString(),outcome=outcome,
+                    returnPct=r.returnPct,rMultiple=if(setup.stopPct>0.0)r.returnPct/setup.stopPct else 0.0,
+                    researchSignature=setup.researchSignature,componentStrategyIds=components,
+                    clusterKey=opened.toLocalDate().toString()+"|"+band+"|"+regime.name+"|"+setup.direction.name,
+                    sampleWeight=weight,legacy=true
+                )
+                rows+=StrategyLearningEventEntity.from(o)
+            }
+        }
+        val legacyShadows=prefs.loadChallengerShadows(4000).filter{it.outcome==ChallengerShadowOutcome.WIN||it.outcome==ChallengerShadowOutcome.LOSS}
+        for(r in legacyShadows){
+            val opened=Instant.ofEpochMilli(r.openedAt).atZone(ist)
+            val o=StrategyLearningObservation(
+                eventId="LEGACY-SHADOW|"+r.id,strategyId=r.strategyId,strategyName=r.strategyName,symbol=r.symbol,direction=r.direction,
+                source=StrategyLearningSource.LEGACY_SHADOW,sessionBand=strategyGovernance.sessionBand(opened.toLocalTime()),regime=MarketRegime.MIXED,
+                rawScore=r.score,calibratedProbabilityPct=0.0,entryPrice=r.entryPrice,targetPct=0.0,stopPct=0.0,
+                openedAt=r.openedAt,closedAt=r.resolvedAt,sessionDate=opened.toLocalDate().toString(),
+                outcome=if(r.outcome==ChallengerShadowOutcome.WIN)StrategyLearningOutcome.WIN else StrategyLearningOutcome.LOSS,
+                returnPct=r.returnPct,rMultiple=0.0,researchSignature=r.researchSignature,legacy=true
+            )
+            rows+=StrategyLearningEventEntity.from(o)
+        }
+        if(rows.isNotEmpty())strategyLearning.insertEvents(rows)
+        val priors=prefs.legacyStrategyPriors().map{StrategyLegacyPriorEntity(it.strategyId,it.strategyName,it.observations,it.wins,it.avgReturnPct,System.currentTimeMillis())}
+        if(priors.isNotEmpty())strategyLearning.upsertPriors(priors)
+        prefs.markStrategyV2Migrated()
+        DiagnosticLog.log(appContext,"STRATEGY-V2","migrated legacy evidence • events="+rows.size+" • priors="+priors.size+" • legacy never creates Champion directly")
+    }
+
+    private suspend fun ensureDailyStrategyRoster(date:LocalDate,definitions:List<TradingStrategyDefinition>,settings:AppSettings):List<StrategyRosterDecision>{
+        ensureStrategyLearningV2Migrated()
+        val existing=strategyLearning.rosterForDate(date.toString())
+        if(existing.isNotEmpty())return existing.map{it.toDomain()}
+        val events=strategyLearning.recentEvents(20_000).map{it.toDomain()}
+        val priors=strategyLearning.allPriors().map{it.toDomain()}
+        val frozen=strategyGovernance.buildFrozenRoster(date,definitions,events,priors,settings,ist)
+        strategyLearning.upsertRoster(frozen.map{StrategyRosterEntity.from(it)})
+        DiagnosticLog.log(appContext,"STRATEGY-V2","frozen production roster "+date+" • contexts="+frozen.size+" • Champion="+frozen.count{it.status==StrategyStatus.CHAMPION}+" • Qualified="+frozen.count{it.status==StrategyStatus.QUALIFIED})
+        return frozen
+    }
+
+    private suspend fun currentStrategyRegime():MarketRegime=withContext(Dispatchers.IO){
+        runCatching{
+            regimeClassifier.classify(
+                globalMarket.intradaySeries("^NSEI"),
+                globalMarket.intradaySeries("^BSESN"),
+                globalMarket.intradaySeries("^NSEBANK"),
+                globalMarket.snapshot("^INDIAVIX"),
+                globalMarket.snapshot("SPY"),
+                globalMarket.snapshot("^VIX")
+            ).regime
+        }.getOrElse{MarketRegime.MIXED}
+    }
+
+    private suspend fun recordStrategyLearningV2(r:StrategyRecommendation){
+        if(r.status!=StrategyRecommendationStatus.WIN&&r.status!=StrategyRecommendationStatus.LOSS)return
+        ensureStrategyLearningV2Migrated()
+        val setup=r.setup
+        val components=setup.componentStrategyIds.ifEmpty{listOf(setup.strategyId)}.distinct()
+        val weight=1.0/components.size.coerceAtLeast(1)
+        val opened=Instant.ofEpochMilli(r.openedAt).atZone(ist)
+        val band=setup.contextBand.ifBlank{strategyGovernance.sessionBand(opened.toLocalTime())}
+        val regime=runCatching{MarketRegime.valueOf(setup.contextRegime)}.getOrDefault(MarketRegime.MIXED)
+        val outcome=if(r.status==StrategyRecommendationStatus.WIN)StrategyLearningOutcome.WIN else StrategyLearningOutcome.LOSS
+        val defs=(strategyCatalog?:strategyCatalogClient.embedded()).strategies.associateBy{it.id}
+        val rows=components.map{cid->
+            StrategyLearningEventEntity.from(StrategyLearningObservation(
+                eventId="V2|"+r.id+"|"+cid,strategyId=cid,strategyName=defs[cid]?.name?:setup.strategyName,
+                symbol=setup.symbol,direction=setup.direction,
+                source=if(components.size>1)StrategyLearningSource.COMPONENT_CREDIT else StrategyLearningSource.LIVE_V2,
+                sessionBand=band,regime=regime,rawScore=setup.rawScore,calibratedProbabilityPct=setup.calibratedProbabilityPct,
+                entryPrice=setup.entryPrice,targetPct=setup.targetPct,stopPct=setup.stopPct,openedAt=r.openedAt,closedAt=r.closedAt,
+                sessionDate=opened.toLocalDate().toString(),outcome=outcome,returnPct=r.returnPct,
+                rMultiple=if(setup.stopPct>0.0)r.returnPct/setup.stopPct else 0.0,researchSignature=setup.researchSignature,
+                componentStrategyIds=components,clusterKey=opened.toLocalDate().toString()+"|"+band+"|"+regime.name+"|"+setup.direction.name,
+                sampleWeight=weight,legacy=false
+            ))
+        }
+        strategyLearning.insertEvents(rows)
+    }
+
+    suspend fun strategyV2EventCount():Int{ensureStrategyLearningV2Migrated();return strategyLearning.eventCount()}
 
     private fun nextTradingDate(from:LocalDate):LocalDate=NseTradingCalendar2026.nextTradingDate(from)
 
