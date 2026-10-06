@@ -9,7 +9,7 @@ enum class FeedHealthState { NEVER_LOADED, OK, EMPTY, ERROR }
 enum class FreezeOutcome { PICKS, NO_SIGNAL, NO_DATA }
 enum class MarketPhase { PRE_OPEN, OPEN, POST_CLOSE, WEEKEND }
 enum class TradeDirection { LONG, SHORT }
-enum class StrategyStatus { CHAMPION, ACTIVE, CHALLENGER, PROBATION, SUSPENDED }
+enum class StrategyStatus { CHAMPION, QUALIFIED, ACTIVE, CHALLENGER, PROBATION, SUSPENDED }
 
 data class Credentials(val mode: AuthMode = AuthMode.TOTP,val apiKeyOrTotpToken: String = "",val secret: String = "")
 
@@ -78,14 +78,43 @@ data class TradingStrategyDefinition(
 
 data class StrategyPerformance(
     val strategyId:String,val name:String,val observations:Int,val wins:Int,val accuracyPct:Double,val avgReturnPct:Double,
-    val expectancyPct:Double,val maxDrawdownPct:Double,val confidenceFloorPct:Double,val status:StrategyStatus
+    val expectancyPct:Double,val maxDrawdownPct:Double,val confidenceFloorPct:Double,val status:StrategyStatus,
+    val recentAccuracyPct:Double=0.0,val distinctSessions:Int=0,val shadowAccuracyPct:Double=0.0,
+    val netExpectancyR:Double=0.0,val contextLabel:String=""
+)
+
+enum class StrategyLearningSource { LIVE_V2, SHADOW_V2, LEGACY_LIVE, LEGACY_SHADOW, COMPONENT_CREDIT }
+enum class StrategyLearningOutcome { PENDING, WIN, LOSS, AMBIGUOUS, INVALID }
+
+data class StrategyLearningObservation(
+    val eventId:String,val strategyId:String,val strategyName:String,val symbol:String,val direction:TradeDirection,
+    val source:StrategyLearningSource,val sessionBand:String,val regime:MarketRegime,val rawScore:Double,
+    val calibratedProbabilityPct:Double,val entryPrice:Double,val targetPct:Double,val stopPct:Double,
+    val openedAt:Long,val closedAt:Long,val sessionDate:String,val outcome:StrategyLearningOutcome,
+    val returnPct:Double,val rMultiple:Double,val researchSignature:String="",val componentStrategyIds:List<String> = emptyList(),
+    val clusterKey:String="",val sampleWeight:Double=1.0,val legacy:Boolean=false
+)
+
+data class StrategyLegacyPrior(
+    val strategyId:String,val strategyName:String,val observations:Int,val wins:Int,val avgReturnPct:Double
+)
+
+data class StrategyRosterDecision(
+    val sessionDate:String,val strategyId:String,val strategyName:String,val direction:TradeDirection,
+    val sessionBand:String,val regime:MarketRegime,val status:StrategyStatus,val samples:Int,val wins:Int,
+    val distinctSessions:Int,val hitRatePct:Double,val recentHitRatePct:Double,val expectancyR:Double,
+    val confidenceFloorPct:Double,val shadowSamples:Int,val shadowHitRatePct:Double,val calibratedBasePct:Double,
+    val frozenAt:Long,val note:String=""
 )
 
 data class StrategySetup(
     val symbol:String,val companyName:String,val strategyId:String,val strategyName:String,val direction:TradeDirection,
     val score:Double,val entryPrice:Double,val targetPct:Double,val stopPct:Double,val evidence:String,
     val listingAgeDays:Long?=null,val generatedAt:Long=System.currentTimeMillis(),
-    val researchSignature:String="",val handbookQualityPct:Double=0.0,val handbookPattern:String="",val handbookCombination:String=""
+    val researchSignature:String="",val handbookQualityPct:Double=0.0,val handbookPattern:String="",val handbookCombination:String="",
+    val rawScore:Double=score,val calibratedProbabilityPct:Double=0.0,val expectedR:Double=0.0,
+    val contextBand:String="",val contextRegime:String="",val componentStrategyIds:List<String> = emptyList(),
+    val modelVersion:String="STRAT-GOV-V2-1.7.0"
 )
 
 enum class StrategyRecommendationStatus { LIVE, WIN, LOSS, EXPIRED, INVALIDATED }
@@ -138,7 +167,8 @@ data class StrategyTournamentSummary(
     val generatedAt:Long,val universeCount:Int,val strategiesRun:Int,val symbolsEnriched:Int,
     val topSetups:List<StrategySetup>,val activeStrategies:List<TradingStrategyDefinition>,
     val performances:List<StrategyPerformance>,val catalogVersion:String,val message:String,
-    val championInsights:List<String> = emptyList(),val rejectedJournalCount:Int=0,val handbookVersion:String=""
+    val championInsights:List<String> = emptyList(),val rejectedJournalCount:Int=0,val handbookVersion:String="",
+    val productionRosterDate:String="",val productionContext:String="",val strategyV2EventCount:Int=0
 )
 
 data class GrowwApiHealthSnapshot(
