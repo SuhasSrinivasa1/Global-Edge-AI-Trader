@@ -201,6 +201,5 @@ data class AppSettings(
     val globalTopCandidates:Int=10,val globalMinForeignGapPct:Double=0.75,val globalContinuationTargetPct:Double=0.5,
     val strategyTournamentEnabled:Boolean=true,val strategyActiveCount:Int=20,val strategyTopCandidates:Int=10,
     val strategyMinChampionAccuracy:Double=60.0,val strategyMinChampionSamples:Int=30,val strategyCatalogRefreshDays:Int=7,
-    val strategyHistorySymbolsPerPass:Int=80,
-    val multifyLiveTradingEnabled:Boolean=false
+    val strategyHistorySymbolsPerPass:Int=80
 )
