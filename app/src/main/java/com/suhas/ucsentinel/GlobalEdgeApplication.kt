@@ -9,6 +9,7 @@ import com.suhas.globaledgeai.diagnostics.DiagnosticLog
 import com.suhas.globaledgeai.worker.NightlyLearningWorker
 import com.suhas.globaledgeai.worker.LearningWorker
 import com.suhas.globaledgeai.worker.ScanWorker
+import com.suhas.globaledgeai.worker.NearCloseAlarmScheduler
 import java.time.Duration
 import java.time.LocalTime
 import java.time.ZoneId
@@ -22,7 +23,7 @@ class GlobalEdgeApplication:Application(){
         val wm=WorkManager.getInstance(this)
         val network=Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
         val schedulerPrefs=getSharedPreferences("global_edge_scheduler",MODE_PRIVATE)
-        val migrate=schedulerPrefs.getInt("version",0)!=170
+        val migrate=schedulerPrefs.getInt("version",0)!=181
         val periodicPolicy=if(migrate)ExistingPeriodicWorkPolicy.UPDATE else ExistingPeriodicWorkPolicy.KEEP
 
         val scan=PeriodicWorkRequestBuilder<ScanWorker>(15,TimeUnit.MINUTES).setConstraints(network).build()
@@ -38,9 +39,11 @@ class GlobalEdgeApplication:Application(){
             wm.cancelUniqueWork("global_edge_ai_market_anchor_0")
             wm.cancelUniqueWork("global_edge_ai_market_anchor_1")
         }
+        // Retire periodic near-close anchors: OEM batching pushed all four to 15:33 in the v1.8 field log.
+        listOf("global_edge_ai_market_anchor_14_50","global_edge_ai_market_anchor_15_10","global_edge_ai_market_anchor_15_20","global_edge_ai_market_anchor_15_25").forEach(wm::cancelUniqueWork)
 
-        // Daily safety anchors. The foreground service remains the owner; these only recover stale service state.
-        listOf(LocalTime.of(9,15),LocalTime.of(14,50),LocalTime.of(15,10),LocalTime.of(15,20),LocalTime.of(15,25)).forEach{t->
+        // Keep the opening watchdog on WorkManager. Near-close uses AlarmManager wakeups below.
+        listOf(LocalTime.of(9,15)).forEach{t->
             var target=now.toLocalDate().atTime(t).atZone(ist)
             if(!target.isAfter(now))target=target.plusDays(1)
             val delay=Duration.between(now,target).toMillis().coerceAtLeast(0L)
@@ -60,7 +63,8 @@ class GlobalEdgeApplication:Application(){
         val nightly=PeriodicWorkRequestBuilder<NightlyLearningWorker>(24,TimeUnit.HOURS)
             .setInitialDelay(nightlyDelay,TimeUnit.MILLISECONDS).setConstraints(network).build()
         wm.enqueueUniquePeriodicWork("global_edge_ai_nightly_deep_learning",periodicPolicy,nightly)
-        schedulerPrefs.edit().putInt("version",170).apply()
+        NearCloseAlarmScheduler.schedule(this)
+        schedulerPrefs.edit().putInt("version",181).apply()
     }
     override fun onTrimMemory(level:Int){super.onTrimMemory(level);if(level>=ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)repository.trimMemory()}
 }
