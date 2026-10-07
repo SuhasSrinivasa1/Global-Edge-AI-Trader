@@ -7,6 +7,7 @@ import com.suhas.globaledgeai.diagnostics.DiagnosticLog
 
 class BootReceiver: BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        DiagnosticLog.log(context,"BOOT","Received ${intent?.action.orEmpty()}; WorkManager schedules remain active. Foreground scanner will start from the next visible app activity.")
+        NearCloseAlarmScheduler.schedule(context)
+        DiagnosticLog.log(context,"BOOT","Received ${intent?.action.orEmpty()}; WorkManager remains armed and near-close UC wake alarms were rescheduled.")
     }
 }
