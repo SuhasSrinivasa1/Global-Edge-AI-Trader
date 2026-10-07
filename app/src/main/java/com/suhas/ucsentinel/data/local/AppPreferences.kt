@@ -51,8 +51,7 @@ class AppPreferences(private val context:Context){
         strategyTournamentEnabled=prefs.getBoolean("strategy_tournament_enabled",true),strategyActiveCount=prefs.getInt("strategy_active_count",20),
         strategyTopCandidates=prefs.getInt("strategy_top_candidates",10),strategyMinChampionAccuracy=prefs.getFloat("strategy_min_champion_accuracy",60f).toDouble(),
         strategyMinChampionSamples=prefs.getInt("strategy_min_champion_samples",30),strategyCatalogRefreshDays=prefs.getInt("strategy_catalog_refresh_days",7),
-        strategyHistorySymbolsPerPass=prefs.getInt("strategy_history_symbols_per_pass",80),
-        multifyLiveTradingEnabled=prefs.getBoolean("multify_live_trading_enabled",false)&&prefs.getString("multify_live_arm_date","")==LocalDate.now(ist).toString()
+        strategyHistorySymbolsPerPass=prefs.getInt("strategy_history_symbols_per_pass",80)
     )
 
     fun tradingStaticIp():String=prefs.getString("trading_static_ip","").orEmpty()
@@ -71,9 +70,7 @@ class AppPreferences(private val context:Context){
         .putBoolean("strategy_tournament_enabled",s.strategyTournamentEnabled).putInt("strategy_active_count",s.strategyActiveCount)
         .putInt("strategy_top_candidates",s.strategyTopCandidates).putFloat("strategy_min_champion_accuracy",s.strategyMinChampionAccuracy.toFloat())
         .putInt("strategy_min_champion_samples",s.strategyMinChampionSamples).putInt("strategy_catalog_refresh_days",s.strategyCatalogRefreshDays)
-        .putInt("strategy_history_symbols_per_pass",s.strategyHistorySymbolsPerPass)
-        .putBoolean("multify_live_trading_enabled",s.multifyLiveTradingEnabled)
-        .putString("multify_live_arm_date",if(s.multifyLiveTradingEnabled)LocalDate.now(ist).toString() else "").apply()}
+        .putInt("strategy_history_symbols_per_pass",s.strategyHistorySymbolsPerPass).apply()}
 
 
     fun lastStrategyScanAt():Long=prefs.getLong("last_strategy_scan_at",0L)
