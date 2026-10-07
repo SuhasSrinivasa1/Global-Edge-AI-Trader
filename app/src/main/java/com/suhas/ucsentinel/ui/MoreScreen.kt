@@ -302,11 +302,10 @@ private fun Settings(state:UiState,vm:MainViewModel){
                     output=out,
                     appVersion=BuildConfig.VERSION_NAME,
                     stateReport=repo.endOfDayDiagnosticReport(),
-                    learningReport=repo.weeklyLearningReport(),
-                    multifyReport=repo.multifyLearningReport()
+                    learningReport=repo.weeklyLearningReport()
                 )
             }.onSuccess{
-                DiagnosticLog.log(ctx,"EXPORT","Centralized diagnostic + learning + Multify bundle exported")
+                DiagnosticLog.log(ctx,"EXPORT","Centralized diagnostic + learning bundle exported")
                 logExportStatus="Centralized log ZIP saved • use the same export for daily, weekly or monthly review"
             }.onFailure{logExportStatus="Centralized export failed: "+it.message}
         }
@@ -348,7 +347,7 @@ private fun Settings(state:UiState,vm:MainViewModel){
                         style=MaterialTheme.typography.bodySmall,
                         color=if(state.learningVaultConfigured)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                     )
-                    Text("The vault keeps scanner/strategy/global learning, ledgers and Multify research state in a document outside the app sandbox. Groww credentials/tokens are excluded. Restoring never re-arms REAL Multify orders and exact LIVE-source trust must be confirmed again.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("The vault keeps scanner/strategy/global learning and ledgers in a document outside the app sandbox. Groww credentials and access tokens are excluded.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
                         Button(onClick={vaultCreator.launch("Global-Edge-Learning-Vault.json")},modifier=Modifier.weight(1f)){Text(if(state.learningVaultConfigured)"Replace vault" else "Create vault")}
                         OutlinedButton(onClick=vm::backupLearningVaultNow,enabled=state.learningVaultConfigured&&!state.busy,modifier=Modifier.weight(1f)){Text("Backup now")}
@@ -365,7 +364,6 @@ private fun Settings(state:UiState,vm:MainViewModel){
                     Text("UC + Pressure • 5-minute market fast lane",style=MaterialTheme.typography.bodySmall)
                     Text("Strategies • ranked deep-history rotation with execution cautions",style=MaterialTheme.typography.bodySmall)
                     Text("Global • independent research, lower priority than NSE live engines during market hours",style=MaterialTheme.typography.bodySmall)
-                    Text("Multify • ${if(state.multifyListenerEnabled) "notification listener active" else "listener not enabled"} • ${state.multifyEvents.size} captured events",style=MaterialTheme.typography.bodySmall)
                     Text("Learning • ${if(state.settings.learningEnabled) "15-minute audit + 17:45 IST deep replay" else "disabled"}",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.primary)
                 }
             }
@@ -446,7 +444,7 @@ private fun Settings(state:UiState,vm:MainViewModel){
                 Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
                     Text("Centralized log export",style=MaterialTheme.typography.titleMedium)
                     Text(
-                        "One ZIP for daily, weekly or monthly review. It contains the runtime timeline, all persisted scanner/strategy/global state, learning/autopsy/shadow reports, and the complete Multify lab summary including shadow P&L, event path, stock-specific Champion memory and decisions. Groww credentials, TOTP secrets and access tokens are excluded.",
+                        "One ZIP for daily, weekly or monthly review. It contains the runtime timeline, persisted scanner/strategy/global state, learning/autopsy/shadow reports and broker diagnostics. Groww credentials, TOTP secrets and access tokens are excluded.",
                         color=MaterialTheme.colorScheme.onSurfaceVariant,
                         style=MaterialTheme.typography.bodySmall
                     )
