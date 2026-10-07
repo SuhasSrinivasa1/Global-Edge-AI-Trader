@@ -38,9 +38,8 @@ private fun CompactHeader(title:String,state:UiState,lastUpdated:Long=0L,onRefre
         if(!state.authenticated)Text("Groww authentication required",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.error)
         else {
             Text("5 min live • 15 min learning • nightly deep replay • shadow validation",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.primary)
-            val multify=if(state.multifyListenerEnabled)"Multify ON" else "Multify OFF"
             val learning=if(state.settings.learningEnabled)"Learning ON" else "Learning OFF"
-            Text("System • Groww ${state.growwApiHealth.status} • $multify • $learning",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("System • Groww ${state.growwApiHealth.status} • $learning",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             val hbAgeMs=if(state.scannerHeartbeatAt>0L)(System.currentTimeMillis()-state.scannerHeartbeatAt).coerceAtLeast(0L) else Long.MAX_VALUE
             val hbFresh=hbAgeMs<=3L*60_000L
             val hbText=when{
