@@ -31,6 +31,11 @@
         </service>
 
         <receiver
+            android:name=".worker.NearCloseAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <receiver
             android:name=".worker.BootReceiver"
             android:enabled="true"
             android:exported="true">
