@@ -57,13 +57,6 @@ class PersistentLearningVault(private val context:Context,private val strategyDb
             }
             editor.apply()
         }
-        context.getSharedPreferences("global_edge_ai_prefs",Context.MODE_PRIVATE).edit()
-            .putBoolean("multify_live_trading_enabled",false)
-            .remove("multify_live_arm_date")
-            .apply()
-        context.getSharedPreferences("global_edge_multify_events",Context.MODE_PRIVATE).edit()
-            .remove("trusted_multify_package_v168")
-            .apply()
         if(schema>=2&&strategyDb!=null){
             val room=root.optJSONObject("strategyRoomV2")
             if(room!=null){
@@ -140,8 +133,6 @@ class PersistentLearningVault(private val context:Context,private val strategyDb
     private fun excluded(store:String,key:String):Boolean{
         val k=key.lowercase()
         if(k.contains("access_token")||k.contains("password")||k.contains("credential")||k.contains("totp_secret"))return true
-        if(store=="global_edge_ai_prefs"&&(key=="multify_live_trading_enabled"||key=="multify_live_arm_date"))return true
-        if(store=="global_edge_multify_events"&&key=="trusted_multify_package_v168")return true
         return false
     }
 
@@ -212,10 +203,6 @@ class PersistentLearningVault(private val context:Context,private val strategyDb
         private const val KEY_URI="vault_uri"
         private const val KEY_LAST_BACKUP_AT="last_backup_at"
         private const val KEY_LAST_RESTORE_AT="last_restore_at"
-        private val STORES=listOf(
-            "global_edge_ai_prefs",
-            "global_edge_multify_trading_v164",
-            "global_edge_multify_events"
-        )
+        private val STORES=listOf("global_edge_ai_prefs")
     }
 }
