@@ -28,7 +28,6 @@ class MarketScanService: Service() {
     private var lastLearningPass = 0L
     private var lastGovernancePass = 0L
     private var lastEvidencePass = 0L
-    private var lastMultifyPass = 0L
     private var marketJob:Job?=null
     private var strategyJob:Job?=null
     private var globalJob:Job?=null
@@ -134,14 +133,6 @@ class MarketScanService: Service() {
                         status = "Authentication required • background market scan paused"
                         DiagnosticLog.log(this,"AUTH","Automation authentication unavailable")
                     } else {
-                        // Multify is the highest-priority intraday reaction lane. A notification worker handles
-                        // the first decision immediately; this one-minute pass manages shadow exits/reversals and
-                        // later waves for recently alerted equity symbols before the broader scanners consume API budget.
-                        if(nowMs-lastMultifyPass>=60_000L){
-                            lastMultifyPass=nowMs
-                            runCatching{repo.monitorMultifyShadowLane()}
-                                .onSuccess{n->if(n>0)DiagnosticLog.log(this,"MULTIFY-WAVE","shadow lane changed $n positions/waves")}
-                                .onFailure{DiagnosticLog.log(this,"MULTIFY-WAVE","shadow monitor failed",it)}
                         }
                         // v1.6.2 coordinates the three market engines instead of launching them into the same
                         // Groww request window. UC/Pressure gets first claim, Strategy second, Global third.
