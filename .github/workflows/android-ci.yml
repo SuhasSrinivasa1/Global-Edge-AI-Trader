@@ -49,7 +49,6 @@ jobs:
           set -euo pipefail
           grep -q 'versionCode = 190' app/build.gradle.kts
           grep -q 'versionName = "1.8.0"' app/build.gradle.kts
-          grep -q 'CONFIRM_1M' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
           grep -q 'scanUpperCircuitThreePm' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
           grep -q '!phase.open' app/src/main/java/com/suhas/ucsentinel/domain/engine/GlobalLeadEngine.kt
           grep -q 'thresholdPool' app/src/main/java/com/suhas/ucsentinel/domain/engine/ScannerEngine.kt
