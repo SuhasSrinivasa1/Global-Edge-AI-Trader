@@ -133,7 +133,6 @@ class MarketScanService: Service() {
                         status = "Authentication required • background market scan paused"
                         DiagnosticLog.log(this,"AUTH","Automation authentication unavailable")
                     } else {
-                        }
                         // v1.6.2 coordinates the three market engines instead of launching them into the same
                         // Groww request window. UC/Pressure gets first claim, Strategy second, Global third.
                         // The service heartbeat remains independent, while API-heavy jobs are serialized.
