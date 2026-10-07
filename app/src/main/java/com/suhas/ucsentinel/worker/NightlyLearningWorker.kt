@@ -13,11 +13,10 @@ class NightlyLearningWorker(appContext:Context,params:WorkerParameters):Coroutin
         return try{
             DiagnosticLog.log(applicationContext,"NIGHTLY","deep replay start")
             val learning=repo.runAutonomousLearningPass(force=true)
-            val multifyForensic=runCatching{repo.runMultifyForensicReplay()}.getOrElse{"Multify forensic replay failed: ${it.message}"}
             val challenger=runCatching{repo.resolveChallengerShadows()}.getOrDefault(0)
             runCatching{repo.scanUpperCircuitNextSession()}
             if(repo.settings().globalLeadEnabled)runCatching{repo.scanGlobalLead()}
-            DiagnosticLog.log(applicationContext,"NIGHTLY","deep replay complete • $learning • $multifyForensic • challenger $challenger")
+            DiagnosticLog.log(applicationContext,"NIGHTLY","deep replay complete • $learning • challenger $challenger")
             Result.success()
         }catch(t:Throwable){
             DiagnosticLog.log(applicationContext,"NIGHTLY","deep replay failed",t)
