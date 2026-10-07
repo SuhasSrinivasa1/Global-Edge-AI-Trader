@@ -14,8 +14,6 @@ import com.suhas.globaledgeai.MainActivity
 import com.suhas.globaledgeai.domain.model.Candidate
 import com.suhas.globaledgeai.domain.model.GlobalLeadCandidate
 import com.suhas.globaledgeai.domain.model.StrategySetup
-import com.suhas.globaledgeai.domain.model.MultifyDecision
-import com.suhas.globaledgeai.domain.model.MultifyDecisionTier
 import java.util.Locale
 import kotlin.math.abs
 
@@ -24,7 +22,6 @@ object AppNotifier {
     private const val GLOBAL_CHANNEL = "global_lead_entry_alerts"
     private const val STRATEGY_CHANNEL = "strategy_entry_alerts"
     private const val ORDER_CHANNEL = "prepared_order_tickets"
-    private const val MULTIFY_CHANNEL = "multify_reaction_alerts"
     private const val DEDUPE_MS = 20L * 60L * 1000L
 
     fun ensureChannel(context: Context) {
@@ -44,10 +41,6 @@ object AppNotifier {
             })
             manager.createNotificationChannel(NotificationChannel(ORDER_CHANNEL,"Prepared order tickets",NotificationManager.IMPORTANCE_HIGH).apply {
                 description="Confirms that a model-card order ticket has been prepared for review."
-                enableVibration(true)
-            })
-            manager.createNotificationChannel(NotificationChannel(MULTIFY_CHANNEL,"Multify reaction intelligence",NotificationManager.IMPORTANCE_HIGH).apply {
-                description="Immediate Global Edge analysis after a captured Multify cash-equity entry/exit event."
                 enableVibration(true)
             })
         }
@@ -187,21 +180,5 @@ object AppNotifier {
         runCatching{NotificationManagerCompat.from(context).notify((System.currentTimeMillis()%100000).toInt()+2500,n)}
     }
 
-    fun notifyMultifyDecision(context:Context,d:MultifyDecision){
-        if(!allowed(context)||d.tier !in setOf(MultifyDecisionTier.LIVE,MultifyDecisionTier.DEVELOPING))return
-        ensureChannel(context)
-        val fingerprint="${d.symbol}:${d.tier}:${d.direction}:${d.strategyTag}:${d.score.toInt()}"
-        if(!shouldNotify(context,"multify",fingerprint))return
-        val direction=d.direction?.name?:"WAIT"
-        val text="$direction ${d.symbol} • ${d.tier.name} • score ${d.score.toInt()} • ₹${String.format(Locale.US,"%.2f",d.price)} • ${d.strategyTag}"
-        val n=NotificationCompat.Builder(context,MULTIFY_CHANNEL)
-            .setSmallIcon(android.R.drawable.stat_notify_more)
-            .setContentTitle("Multify → Global Edge: $direction ${d.symbol}")
-            .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text+"\n"+d.reason+"\nShadow lane tracks the same decision automatically; the Multify REAL ORDERS toggle controls automatic Groww execution for LIVE-tier decisions."))
-            .setPriority(NotificationCompat.PRIORITY_HIGH).setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
-            .setAutoCancel(true).setContentIntent(pending(context,2701)).build()
-        runCatching{NotificationManagerCompat.from(context).notify((System.currentTimeMillis()%100000).toInt()+2700,n)}
-    }
 
 }
