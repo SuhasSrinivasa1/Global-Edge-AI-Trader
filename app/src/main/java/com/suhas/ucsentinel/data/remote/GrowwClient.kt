@@ -14,8 +14,10 @@ import org.json.JSONObject
 import java.io.IOException
 import java.security.MessageDigest
 import java.time.LocalTime
+import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Mac
@@ -34,6 +36,21 @@ class GrowwClient {
     companion object {
         const val API_BASE = "https://api.groww.in"
         const val INSTRUMENT_URL = "https://growwapi-assets.groww.in/instruments/instrument.csv"
+
+        internal fun parseHistoricalEpochSeconds(raw:Any?):Long{
+            fun normalize(v:Long):Long=if(v>10_000_000_000L)v/1000L else v
+            return when(raw){
+                is Number->normalize(raw.toLong())
+                is String->{
+                    val s=raw.trim()
+                    s.toLongOrNull()?.let(::normalize)
+                        ?:runCatching{LocalDateTime.parse(s,DateTimeFormatter.ISO_LOCAL_DATE_TIME).atZone(ZoneId.of("Asia/Kolkata")).toEpochSecond()}
+                            .recoverCatching{LocalDateTime.parse(s,DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")).atZone(ZoneId.of("Asia/Kolkata")).toEpochSecond()}
+                            .getOrDefault(0L)
+                }
+                else->0L
+            }
+        }
     }
 
     private val client: OkHttpClient = OkHttpClient.Builder()
@@ -378,14 +395,15 @@ class GrowwClient {
             for (i in 0 until candles.length()) {
                 val row = candles.optJSONArray(i) ?: continue
                 if (row.length() < 6) continue
+                val epochSeconds=parseHistoricalEpochSeconds(row.opt(0))
                 val open=finiteNumber(row.optDouble(1))
                 val high=finiteNumber(row.optDouble(2))
                 val low=finiteNumber(row.optDouble(3))
                 val close=finiteNumber(row.optDouble(4))
-                if(open<=0.0||high<=0.0||low<=0.0||close<=0.0)continue
+                if(epochSeconds<=0L||open<=0.0||high<=0.0||low<=0.0||close<=0.0)continue
                 add(
                     Candle(
-                        epochSeconds = row.optLong(0),
+                        epochSeconds = epochSeconds,
                         open = open,
                         high = high,
                         low = low,
