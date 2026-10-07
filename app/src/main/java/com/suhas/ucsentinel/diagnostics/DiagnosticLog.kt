@@ -101,8 +101,7 @@ object DiagnosticLog {
         output: OutputStream,
         appVersion: String,
         stateReport: String,
-        learningReport: String,
-        multifyReport: String
+        learningReport: String
     ) {
         val now=ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
         ZipOutputStream(output.buffered()).use { zip ->
@@ -120,13 +119,11 @@ object DiagnosticLog {
                 appendLine()
                 appendLine("state-report.txt = persisted scheduler/scanner/call/strategy/global/broker state")
                 appendLine("learning-report.txt = accuracy/calibration/walk-forward/autopsy/shadow learning")
-                appendLine("multify-lab.txt = Multify events, stock-specific strategy memory, shadow P&L and decisions")
                 appendLine("global-edge-diagnostics.log = current runtime timeline")
                 appendLine("global-edge-diagnostics.1..6.log = retained rotated timelines for longer weekly/monthly review")
             })
             add("state-report.txt",stateReport)
             add("learning-report.txt",learningReport)
-            add("multify-lab.txt",multifyReport)
             val old=File(context.filesDir,"global-edge-diagnostics.previous.log")
             val current=file(context)
             if(old.exists())add("global-edge-diagnostics.previous.log",old.readText())
