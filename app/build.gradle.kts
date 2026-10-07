@@ -13,8 +13,8 @@ android {
         applicationId = "com.suhas.globaledgeai"
         minSdk = 28
         targetSdk = 36
-        versionCode = 180
-        versionName = "1.7.0"
+        versionCode = 190
+        versionName = "1.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
