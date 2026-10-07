@@ -43,12 +43,12 @@ jobs:
         shell: bash
         run: gradle --no-daemon --console=plain clean testDebugUnitTest assembleRelease
 
-      - name: Verify v1.8.0 reliability and feature removal
+      - name: Verify v1.8.1 reliability and feature removal
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'versionCode = 190' app/build.gradle.kts
-          grep -q 'versionName = "1.8.0"' app/build.gradle.kts
+          grep -q 'versionCode = 191' app/build.gradle.kts
+          grep -q 'versionName = "1.8.1"' app/build.gradle.kts
           grep -q 'scanUpperCircuitThreePm' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
           grep -q '!phase.open' app/src/main/java/com/suhas/ucsentinel/domain/engine/GlobalLeadEngine.kt
           grep -q 'thresholdPool' app/src/main/java/com/suhas/ucsentinel/domain/engine/ScannerEngine.kt
@@ -70,6 +70,8 @@ jobs:
           grep -q '1minute' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
           grep -q 'schemaVersion.*SCHEMA_VERSION' app/src/main/java/com/suhas/ucsentinel/data/local/PersistentLearningVault.kt
           grep -q 'currentSessionStart' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
+          grep -q 'parseHistoricalEpochSeconds' app/src/main/java/com/suhas/ucsentinel/data/remote/GrowwClient.kt
+          test -f app/src/test/java/com/suhas/ucsentinel/GrowwHistoricalTimestampTest.kt
           grep -q 'context-fallback' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
           grep -q 'isTodayIst' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
           ! grep -Rqi 'multify' app/src/main app/src/test
@@ -79,7 +81,7 @@ jobs:
       - name: Upload unsigned release APK
         uses: actions/upload-artifact@v4
         with:
-          name: Global-Edge-AI-Trader-v1.8.0-unsigned
+          name: Global-Edge-AI-Trader-v1.8.1-unsigned
           retention-days: 30
           if-no-files-found: error
           path: app/build/outputs/apk/release/app-release-unsigned.apk
