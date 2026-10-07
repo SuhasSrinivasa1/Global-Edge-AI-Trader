@@ -3,7 +3,6 @@ package com.suhas.globaledgeai.ui
 import androidx.lifecycle.*
 import com.suhas.globaledgeai.data.repository.GlobalEdgeAITraderRepository
 import com.suhas.globaledgeai.domain.model.*
-import com.suhas.globaledgeai.notifications.MultifyEvent
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -31,11 +30,7 @@ data class UiState(
     val decisionSnapshots:List<DecisionSnapshot> = emptyList(),val pointInTimeEvidence:List<PointInTimeEvidence> = emptyList(),
     val evidenceFabric:EvidenceFabricSummary?=null,
     val growwApiHealth:GrowwApiHealthSnapshot=GrowwApiHealthSnapshot(),
-    val learningVaultConfigured:Boolean=false,val learningVaultLastBackupAt:Long=0L,val learningVaultLastRestoreAt:Long=0L,
-    val multifyEvents:List<MultifyEvent> = emptyList(),val multifyListenerEnabled:Boolean=false,
-    val multifyCandidatePackage:String="",val multifyTrustedPackage:String="",
-    val multifyDashboard:MultifyDashboard=MultifyDashboard(),val multifyShadowTrades:List<MultifyShadowTrade> = emptyList(),
-    val multifyDecisions:List<MultifyDecision> = emptyList(),val multifyProfiles:List<MultifyStockProfile> = emptyList()
+    val learningVaultConfigured:Boolean=false,val learningVaultLastBackupAt:Long=0L,val learningVaultLastRestoreAt:Long=0L
 )
 
 class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
@@ -111,9 +106,7 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
             strategyTournamentSummary=repo.strategyTournamentSummary(),lastStrategyScanAt=repo.lastStrategyScanAt(),lastStrategyAttemptAt=repo.lastStrategyAttemptAt(),lastStrategyErrorAt=repo.lastStrategyErrorAt(),lastStrategyError=repo.lastStrategyError(),lastStrategyCatalogRefreshAt=repo.lastStrategyCatalogRefreshAt(),strategyCatalogVersion=repo.strategyCatalogVersion(),
             strategyLive=repo.strategyLiveRecommendations(),strategyClosed=repo.strategyClosedRecommendations(),globalClosed=repo.globalLeadClosedRecommendations(),tradeCalls=repo.tradeCalls(),tradeAutopsies=repo.tradeAutopsies(),
             challengerShadows=repo.challengerShadows(),brokerOrders=repo.brokerOrders(),decisionSnapshots=repo.decisionSnapshots(),pointInTimeEvidence=repo.pointInTimeEvidence(),evidenceFabric=repo.evidenceFabricSummary(),growwApiHealth=repo.growwApiHealth(),
-            learningVaultConfigured=repo.learningVaultConfigured(),learningVaultLastBackupAt=repo.learningVaultLastBackupAt(),learningVaultLastRestoreAt=repo.learningVaultLastRestoreAt(),
-            multifyEvents=repo.multifyEvents(),multifyListenerEnabled=repo.multifyListenerEnabled(),multifyCandidatePackage=repo.multifyCandidatePackage(),multifyTrustedPackage=repo.multifyTrustedPackage(),multifyDashboard=repo.multifyDashboard(),multifyShadowTrades=repo.multifyShadowTrades(),
-            multifyDecisions=repo.multifyDecisions(),multifyProfiles=repo.multifyProfiles())
+            learningVaultConfigured=repo.learningVaultConfigured(),learningVaultLastBackupAt=repo.learningVaultLastBackupAt(),learningVaultLastRestoreAt=repo.learningVaultLastRestoreAt())
     }
 
     private fun reliabilityRefresh(status:String?=null,error:String?=_state.value.error){
@@ -285,53 +278,7 @@ class MainViewModel(private val repo:GlobalEdgeAITraderRepository):ViewModel(){
     fun runReplay(symbol:String,days:Long=30)=viewModelScope.launch{_state.value=_state.value.copy(busy=true,status="Replaying $symbol…",error=null);runCatching{repo.replay(symbol,days)}.onSuccess{_state.value=_state.value.copy(busy=false,replayResult=it,status="Replay complete")}.onFailure{_state.value=_state.value.copy(busy=false,error=it.message,status="Replay failed")}}
     fun refreshNews()=viewModelScope.launch{_state.value=_state.value.copy(busy=true,status="Loading NSE/BSE news…",error=null);runCatching{repo.refreshNews()}.onSuccess{_state.value=_state.value.copy(busy=false,newsItems=it,status="Loaded ${it.size} exchange updates")}.onFailure{_state.value=_state.value.copy(busy=false,error=it.message,status="News refresh failed")}}
     fun runLearningNow()=viewModelScope.launch{_state.value=_state.value.copy(busy=true,status="Running autonomous learning pass…",error=null);runCatching{repo.runAutonomousLearningPass(force=true)}.onSuccess{msg->_state.value=_state.value.copy(busy=false,accuracies=repo.accuracies(),strategyMetrics=repo.strategyMetrics(),status=msg);reliabilityRefresh(error=null)}.onFailure{_state.value=_state.value.copy(busy=false,error=it.message)}}
-    fun submitManualMultifySignal(symbol:String,eventType:MultifyEventType,signalPrice:Double,onResult:(Boolean,String)->Unit)=viewModelScope.launch{
-        _state.value=_state.value.copy(busy=true,status="Processing manual Multify ${eventType.name.replace('_',' ')}…",error=null)
-        runCatching{repo.submitManualMultifyEvent(symbol,eventType,signalPrice)}.onSuccess{decision->
-            val message=decision?.let{"Manual ${it.eventType.name.replace('_',' ')} processed • ${it.tier} ${it.direction?.name.orEmpty()} • ${it.symbol}"}?:"Manual event processed"
-            _state.value=_state.value.copy(
-                busy=false,status=message,error=null,multifyEvents=repo.multifyEvents(),multifyDashboard=repo.multifyDashboard(),
-                multifyShadowTrades=repo.multifyShadowTrades(),multifyDecisions=repo.multifyDecisions(),multifyProfiles=repo.multifyProfiles(),
-                brokerOrders=repo.brokerOrders()
-            )
-            onResult(true,message)
-        }.onFailure{t->
-            val message=t.message.orEmpty().ifBlank{"Manual Multify event failed"}
-            _state.value=_state.value.copy(busy=false,status="Manual Multify event not processed",error=message,multifyEvents=repo.multifyEvents(),brokerOrders=repo.brokerOrders())
-            onResult(false,message)
-        }
-    }
 
-    fun replayMultifyNow()=viewModelScope.launch{
-        _state.value=_state.value.copy(busy=true,status="Replaying captured Multify events…",error=null)
-        runCatching{repo.replayMultifyEvents(80)}.onSuccess{n->
-            _state.value=_state.value.copy(busy=false,status="Multify replay complete • $n evaluated",multifyEvents=repo.multifyEvents(),multifyDashboard=repo.multifyDashboard(),multifyShadowTrades=repo.multifyShadowTrades(),multifyDecisions=repo.multifyDecisions(),multifyProfiles=repo.multifyProfiles(),error=null)
-        }.onFailure{t->_state.value=_state.value.copy(busy=false,status="Multify replay failed",error=t.message)}
-    }
-    fun setMultifyLiveTrading(enabled:Boolean){
-        if(enabled&&repo.multifyTrustedPackage().isBlank()){
-            _state.value=_state.value.copy(status="REAL ORDERS remain OFF",error="Trust the exact detected Multify Android package before arming live execution.")
-            reliabilityRefresh();return
-        }
-        val next=repo.settings().copy(multifyLiveTradingEnabled=enabled)
-        repo.saveSettings(next)
-        _state.value=_state.value.copy(settings=repo.settings(),status=if(enabled)"Multify REAL ORDERS armed for today" else "Multify new real orders disabled; shadow continues",error=null)
-        reliabilityRefresh(error=null)
-    }
-    fun trustDetectedMultifyPackage(){
-        val ok=repo.trustMultifyCandidatePackage()
-        reliabilityRefresh(status=if(ok)"Exact Multify package trusted for LIVE execution" else "No valid Multify package has been detected yet",error=if(ok)null else "Wait for a Multify notification, then review and trust its exact package.")
-    }
-    fun clearTrustedMultifyPackage(){
-        repo.clearMultifyTrustedPackage();repo.saveSettings(repo.settings().copy(multifyLiveTradingEnabled=false))
-        reliabilityRefresh(status="Multify LIVE source trust cleared; REAL ORDERS disarmed",error=null)
-    }
-    fun exitAllMultify()=viewModelScope.launch{
-        _state.value=_state.value.copy(busy=true,status="Closing all Multify positions…",error=null)
-        runCatching{repo.exitAllMultifyPositions()}.onSuccess{n->
-            _state.value=_state.value.copy(busy=false,status="Multify exit-all processed • $n positions",error=null);reliabilityRefresh(error=null)
-        }.onFailure{t->_state.value=_state.value.copy(busy=false,status="Multify exit-all failed",error=t.message)}
-    }
     fun updateSettings(s:AppSettings){repo.saveSettings(s);_state.value=_state.value.copy(settings=repo.settings(),status="Settings saved");reliabilityRefresh(error=null)}
     class Factory(private val repo:GlobalEdgeAITraderRepository):ViewModelProvider.Factory{@Suppress("UNCHECKED_CAST")override fun<T:ViewModel>create(modelClass:Class<T>):T=MainViewModel(repo) as T}
 }
