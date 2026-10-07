@@ -7,7 +7,6 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.TrendingUp
@@ -19,7 +18,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 private enum class MainTab(val label:String,val icon:ImageVector){
     UC("UC",Icons.Default.TrendingUp),
     STRATEGIES("Strategies",Icons.Default.ShowChart),
-    MULTIFY("Multify",Icons.Default.NotificationsActive),
     GLOBAL("Global",Icons.Default.Public),
     PORTFOLIO("Portfolio",Icons.Default.AccountBalanceWallet)
 }
@@ -60,7 +58,6 @@ fun AppNavigation(vm:MainViewModel){
         }else when(tab){
             MainTab.UC->UpperCircuitCompactScreen(state,vm,padding)
             MainTab.STRATEGIES->StrategiesCompactScreen(state,vm,padding)
-            MainTab.MULTIFY->MultifyCompactScreen(state,vm,padding)
             MainTab.GLOBAL->GlobalCompactScreen(state,vm,padding)
             MainTab.PORTFOLIO->PortfolioCompactScreen(state,vm,padding)
         }
