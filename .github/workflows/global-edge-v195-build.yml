@@ -87,7 +87,7 @@ jobs:
           grep -q '"LIQUIDITY_SWEEP"' app/src/main/java/com/suhas/ucsentinel/domain/engine/ConfluenceFeatureEngine.kt
           grep -q '"ANCHORED_VWAP"' app/src/main/java/com/suhas/ucsentinel/domain/engine/ConfluenceFeatureEngine.kt
           grep -q '"VOLUME_PROFILE"' app/src/main/java/com/suhas/ucsentinel/domain/engine/ConfluenceFeatureEngine.kt
-          grep -q '"VOLUME_ACCELERATION"' app/src/main/java/com/suhas/ucsentinel/domain/engine/ConfluenceFeatureEngine.kt
+          grep -q '"RVOL_ACCEL"' app/src/main/java/com/suhas/ucsentinel/domain/engine/ConfluenceFeatureEngine.kt
           grep -q '"ATR_REGIME"' app/src/main/java/com/suhas/ucsentinel/domain/engine/ConfluenceFeatureEngine.kt
           grep -q '"OPENING_RANGE"' app/src/main/java/com/suhas/ucsentinel/domain/engine/ConfluenceFeatureEngine.kt
           grep -q '"CANDLE_SEQUENCE"' app/src/main/java/com/suhas/ucsentinel/domain/engine/ConfluenceFeatureEngine.kt
@@ -115,7 +115,7 @@ jobs:
 
           # Existing v1.8.4 architecture must remain.
           grep -q 'DIAGONAL_UP' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
-          grep -q 'THREE_PM("3 PM UC")' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
+          grep -q 'THREE_PM("3 PM Next-Day UC")' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
           grep -q 'time>=LocalTime.of(15,0)' app/src/main/java/com/suhas/ucsentinel/domain/engine/AutomationPolicy.kt
           grep -q 'runChallengerShadowResearchOffHours' app/src/main/java/com/suhas/ucsentinel/worker/NightlyLearningWorker.kt
 
