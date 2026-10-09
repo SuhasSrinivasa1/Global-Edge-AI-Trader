@@ -42,7 +42,7 @@ jobs:
           github-token: ${{ github.token }}
           path: /tmp/v183-artifact
 
-      - name: Apply and verify v1.8.4 patch
+      - name: Apply and verify v1.8.4 architecture
         shell: bash
         run: |
           set -euo pipefail
@@ -50,33 +50,35 @@ jobs:
           SRCZIP=$(find /tmp/v183-artifact -type f -name 'Global-Edge-AI-Trader-v1.8.3-source.zip' | head -n1)
           test -n "$SRCZIP" && test -s "$SRCZIP"
           unzip -q "$SRCZIP" -d /tmp/v194
-          tr -d '\r\n ' < signing-repo/fresh-global-edge/v194b/v183-to-v184.patch.gz.b64 | base64 -d > /tmp/v194.patch.gz
-          gunzip -c /tmp/v194.patch.gz > /tmp/v194.patch
+
+          cat signing-repo/fresh-global-edge/v194/transforms/core00.py.part \
+              signing-repo/fresh-global-edge/v194/transforms/core01.py.part \
+              signing-repo/fresh-global-edge/v194/transforms/core02.py.part \
+              signing-repo/fresh-global-edge/v194/transforms/core03.py.part \
+              signing-repo/fresh-global-edge/v194/transforms/core04.py.part > /tmp/apply_v184_core.py
+          cat signing-repo/fresh-global-edge/v194/transforms/ui00.py.part \
+              signing-repo/fresh-global-edge/v194/transforms/ui01b.py.part \
+              signing-repo/fresh-global-edge/v194/transforms/ui02.py.part \
+              signing-repo/fresh-global-edge/v194/transforms/ui04.py.part \
+              signing-repo/fresh-global-edge/v194/transforms/ui05.py.part \
+              signing-repo/fresh-global-edge/v194/transforms/ui06.py.part \
+              signing-repo/fresh-global-edge/v194/transforms/ui99.py.part > /tmp/apply_v184_ui.py
+
+          python /tmp/apply_v184_core.py
+          python /tmp/apply_v184_ui.py
+          mkdir -p /tmp/v194/app/src/main/java/com/suhas/ucsentinel/domain/engine
+          cp signing-repo/fresh-global-edge/v194/source/DiagonalScannerEngine.kt /tmp/v194/app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
+          python signing-repo/fresh-global-edge/v194/transforms/finalize.py
+
           cd /tmp/v194
-          patch -p1 --batch < /tmp/v194.patch
-
-          # Global is intentionally independent from the retired Pressure engine.
-          python - <<'PY'
-          from pathlib import Path
-          p=Path("app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt")
-          s=p.read_text()
-          s=s.replace('        val pressure=lastSavedDualSummary()?.demand?.candidates?.associate{it.symbol to it.score}.orEmpty()\n','')
-          s=s.replace('globalLeadEngine.finalCandidate(m,f,benchmarks[m.benchmarkTicker],q,prior,pressure[m.indianSymbol],settings,now,direction)',
-                      'globalLeadEngine.finalCandidate(m,f,benchmarks[m.benchmarkTicker],q,prior,null,settings,now,direction)')
-          s=s.replace('        val diagonalContext=lastSavedDualSummary()?.demand?.candidates?.associate{it.symbol to it.score}.orEmpty()\n','')
-          s=s.replace('globalLeadEngine.finalCandidate(m,f,benchmarks[m.benchmarkTicker],q,prior,diagonalContext[m.indianSymbol],settings,now,direction)',
-                      'globalLeadEngine.finalCandidate(m,f,benchmarks[m.benchmarkTicker],q,prior,null,settings,now,direction)')
-          p.write_text(s)
-          PY
-
           grep -q 'versionCode = 194' app/build.gradle.kts
           grep -q 'versionName = "1.8.4"' app/build.gradle.kts
           test -f app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
           grep -q 'DIAGONAL_UP' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
           grep -q 'DIAGONAL_DOWN' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
           grep -q 'RESEARCH_ONLY' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
-          grep -q 'THREE_PM("3 PM UC")' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
-          grep -q 'DIAGONAL("Diagonal")' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
+          grep -q '3 PM Next-Day Upper Circuit' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
+          grep -q 'ForecastLane.DIAGONAL' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
           grep -q 'Top 5 candle patterns' app/src/main/java/com/suhas/ucsentinel/ui/MoreScreen.kt
           grep -q 'Top 10 drivers' app/src/main/java/com/suhas/ucsentinel/ui/MoreScreen.kt
           grep -q 'Top 5 standalone strategies' app/src/main/java/com/suhas/ucsentinel/ui/MoreScreen.kt
