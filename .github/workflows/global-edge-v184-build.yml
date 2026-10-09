@@ -76,7 +76,7 @@ jobs:
           test -f app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
           grep -q 'DIAGONAL_UP' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
           grep -q 'DIAGONAL_DOWN' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
-          grep -q 'RESEARCH_ONLY' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
+          grep -q 'DIAGONAL_RESEARCH' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
           grep -q '3 PM Next-Day Upper Circuit' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
           grep -q 'ForecastLane.DIAGONAL' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
           grep -q 'Top 5 candle patterns' app/src/main/java/com/suhas/ucsentinel/ui/MoreScreen.kt
