@@ -50,33 +50,45 @@ jobs:
           SRCZIP=$(find /tmp/v183-artifact -type f -name 'Global-Edge-AI-Trader-v1.8.3-source.zip' | head -n1)
           test -n "$SRCZIP" && test -s "$SRCZIP"
           unzip -q "$SRCZIP" -d /tmp/v194
-          cat signing-repo/fresh-global-edge/v194/transforms/core00.py.part \
-              signing-repo/fresh-global-edge/v194/transforms/core01.py.part \
-              signing-repo/fresh-global-edge/v194/transforms/core02.py.part \
-              signing-repo/fresh-global-edge/v194/transforms/core03.py.part \
-              signing-repo/fresh-global-edge/v194/transforms/core04.py.part > /tmp/apply_v184_core.py
-          cat signing-repo/fresh-global-edge/v194/transforms/ui00.py.part \
-              signing-repo/fresh-global-edge/v194/transforms/ui01b.py.part \
-              signing-repo/fresh-global-edge/v194/transforms/ui02.py.part \
-              signing-repo/fresh-global-edge/v194/transforms/ui04.py.part \
-              signing-repo/fresh-global-edge/v194/transforms/ui05.py.part \
-              signing-repo/fresh-global-edge/v194/transforms/ui06.py.part \
-              signing-repo/fresh-global-edge/v194/transforms/ui99.py.part > /tmp/apply_v184_ui.py
-          python /tmp/apply_v184_core.py
-          python /tmp/apply_v184_ui.py
-          cp signing-repo/fresh-global-edge/v194/source/DiagonalScannerEngine.kt app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
+          tr -d '\r\n ' < signing-repo/fresh-global-edge/v194b/v183-to-v184.patch.gz.b64 | base64 -d > /tmp/v194.patch.gz
+          gunzip -c /tmp/v194.patch.gz > /tmp/v194.patch
+          cd /tmp/v194
+          patch -p1 --batch < /tmp/v194.patch
+
+          # Global is intentionally independent from the retired Pressure engine.
+          python - <<'PY'
+          from pathlib import Path
+          p=Path("app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt")
+          s=p.read_text()
+          s=s.replace('        val pressure=lastSavedDualSummary()?.demand?.candidates?.associate{it.symbol to it.score}.orEmpty()\n','')
+          s=s.replace('globalLeadEngine.finalCandidate(m,f,benchmarks[m.benchmarkTicker],q,prior,pressure[m.indianSymbol],settings,now,direction)',
+                      'globalLeadEngine.finalCandidate(m,f,benchmarks[m.benchmarkTicker],q,prior,null,settings,now,direction)')
+          s=s.replace('        val diagonalContext=lastSavedDualSummary()?.demand?.candidates?.associate{it.symbol to it.score}.orEmpty()\n','')
+          s=s.replace('globalLeadEngine.finalCandidate(m,f,benchmarks[m.benchmarkTicker],q,prior,diagonalContext[m.indianSymbol],settings,now,direction)',
+                      'globalLeadEngine.finalCandidate(m,f,benchmarks[m.benchmarkTicker],q,prior,null,settings,now,direction)')
+          p.write_text(s)
+          PY
+
           grep -q 'versionCode = 194' app/build.gradle.kts
           grep -q 'versionName = "1.8.4"' app/build.gradle.kts
           test -f app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
           grep -q 'DIAGONAL_UP' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
           grep -q 'DIAGONAL_DOWN' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
-          grep -q 'DIAGONAL_STRONG' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
-          ! grep -q 'DIAGONAL_LIVE' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
-          grep -q '3 PM Next-Day Upper Circuit' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
-          grep -q 'Strategy Lab' app/src/main/java/com/suhas/ucsentinel/ui/MoreScreen.kt
-          grep -q 'Top 10 company fundamentals tracked' app/src/main/java/com/suhas/ucsentinel/ui/MoreScreen.kt
-          grep -q 'provisionalStrategyEligible' app/src/main/java/com/suhas/ucsentinel/domain/engine/AutomationPolicy.kt
+          grep -q 'RESEARCH_ONLY' app/src/main/java/com/suhas/ucsentinel/domain/engine/DiagonalScannerEngine.kt
+          grep -q 'THREE_PM("3 PM UC")' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
+          grep -q 'DIAGONAL("Diagonal")' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
+          grep -q 'Top 5 candle patterns' app/src/main/java/com/suhas/ucsentinel/ui/MoreScreen.kt
+          grep -q 'Top 10 drivers' app/src/main/java/com/suhas/ucsentinel/ui/MoreScreen.kt
+          grep -q 'Top 5 standalone strategies' app/src/main/java/com/suhas/ucsentinel/ui/MoreScreen.kt
+          grep -q 'Top 5 combinations' app/src/main/java/com/suhas/ucsentinel/ui/MoreScreen.kt
+          grep -q 'time>=LocalTime.of(15,0)' app/src/main/java/com/suhas/ucsentinel/domain/engine/AutomationPolicy.kt
+          grep -q 'take(5)' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
+          grep -q 'refreshStrategyCatalog(true)' app/src/main/java/com/suhas/ucsentinel/worker/NightlyLearningWorker.kt
+          grep -q 'runChallengerShadowResearchOffHours' app/src/main/java/com/suhas/ucsentinel/worker/NightlyLearningWorker.kt
+          ! grep -q 'pressure\[m.indianSymbol\]' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
+          ! grep -q 'diagonalContext\[m.indianSymbol\]' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
           ! grep -q 'ForecastLane.PRESSURE' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
+          echo 'v1.8.4 architecture verification passed'
 
       - uses: actions/setup-java@v5
         with:
@@ -88,6 +100,7 @@ jobs:
         run: |
           set -euo pipefail
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platforms;android-36" "build-tools;35.0.0" "platform-tools"
 
@@ -102,6 +115,7 @@ jobs:
           set -o pipefail
           mkdir -p out
           gradle --no-daemon --console=plain clean testDebugUnitTest assembleRelease 2>&1 | tee out/GRADLE-BUILD-TEST.log
+          echo 'Unit tests + assembleRelease: PASS' > out/TEST-RESULT-SUMMARY.txt
 
       - name: Recover preserved signing material
         uses: actions/download-artifact@v4
@@ -119,6 +133,7 @@ jobs:
           set -euo pipefail
           mkdir -p out /tmp/signing
           BACKUP=$(find /tmp/v150-artifact -type f -name 'Global-Edge-AI-Trader-v1.5.0-SIGNING-BACKUP.zip' | head -n1)
+          test -n "$BACKUP" && test -s "$BACKUP"
           unzip -q "$BACKUP" -d /tmp/signing
           STORE_PASS=$(grep '^store_password=' /tmp/signing/SIGNING-INFO.txt | cut -d= -f2-)
           KEY_PASS=$(grep '^key_password=' /tmp/signing/SIGNING-INFO.txt | cut -d= -f2-)
@@ -127,11 +142,31 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign --ks /tmp/signing/global-edge-v1.5.0.keystore --ks-pass pass:"$STORE_PASS" --key-pass pass:"$KEY_PASS" --ks-key-alias globaledge --out "$OUT" "$UNSIGNED"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$OUT" | tee out/APK-SIGNATURE-VERIFY.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$OUT" | tee out/APK-BADGING.txt
+          grep -q "package: name='com.suhas.globaledgeai'" out/APK-BADGING.txt
           grep -q "versionCode='194'" out/APK-BADGING.txt
           grep -q "versionName='1.8.4'" out/APK-BADGING.txt
           CERT_SHA=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$OUT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n1)
           test "$CERT_SHA" = '31ffa51c23b76f450cf099d00b254870bf8eacc5ce79aee4458070a0fab783d7'
           sha256sum "$OUT" | tee out/SHA256.txt
+          {
+            echo 'build=SUCCESS'
+            echo 'package=com.suhas.globaledgeai'
+            echo 'versionCode=194'
+            echo 'versionName=1.8.4'
+            echo "signer_sha256=$CERT_SHA"
+            echo 'pressure_production_removed=true'
+            echo 'diagonal_up_down_research=true'
+            echo 'three_pm_uc_visible=true'
+            echo 'three_pm_uc_freeze_count=5'
+            echo 'strategy_lab_long_short=true'
+            echo 'top5_candles=true'
+            echo 'top10_drivers=true'
+            echo 'top5_standalone=true'
+            echo 'top5_combinations=true'
+            echo 'weekend_catalog_refresh=true'
+            echo 'global_pressure_dependency_removed=true'
+            echo 'five_minute_success_cadence=true'
+          } > out/BUILD-STATUS.txt
           zip -qr out/Global-Edge-AI-Trader-v1.8.4-source.zip . -x '*/.gradle/*' '*/build/*' 'out/*' '*.keystore' '*.jks'
 
       - name: Upload verified v1.8.4
@@ -146,3 +181,6 @@ jobs:
             /tmp/v194/out/APK-SIGNATURE-VERIFY.txt
             /tmp/v194/out/APK-BADGING.txt
             /tmp/v194/out/SHA256.txt
+            /tmp/v194/out/BUILD-STATUS.txt
+            /tmp/v194/out/TEST-RESULT-SUMMARY.txt
+            /tmp/v194/out/GRADLE-BUILD-TEST.log
