@@ -64,7 +64,7 @@ jobs:
           test -n "$SRCZIP" && test -s "$SRCZIP"
           unzip -q "$SRCZIP" -d /tmp/v195
           cd /tmp/v195
-          patch -p1 --batch < /tmp/v185.patch
+          patch -p3 --batch < /tmp/v185.patch
 
       - name: Verify v1.8.5 architecture
         working-directory: /tmp/v195
