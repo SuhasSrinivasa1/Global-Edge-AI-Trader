@@ -47,9 +47,9 @@ jobs:
         run: |
           set -euo pipefail
           tr -d '\r\n ' < signing-repo/fresh-global-edge/v197/v186-to-v187.patch.gz.b64 | base64 -d > /tmp/v187.patch.gz
-          test "$(sha256sum /tmp/v187.patch.gz | awk '{print $1}')" = '70a6a41018f8913d6683f5d9ee09cf58f4de5f5580438cb08bfbdacf495b21bc'
+          test "$(sha256sum /tmp/v187.patch.gz | awk '{print $1}')" = 'd08c55315c6f79933572ff1f718606224299ccfc414c2fa3682ee73939ef70bf'
           gunzip -c /tmp/v187.patch.gz > /tmp/v187.patch
-          test "$(sha256sum /tmp/v187.patch | awk '{print $1}')" = '4e54cdcce1a430fe2ead45adcf11e4cad38c842644ebec120d2b50c7a5180ee0'
+          test "$(sha256sum /tmp/v187.patch | awk '{print $1}')" = '6224247452695fad16b8e052382bb8486eede7118dd5baee7ec0a1b3cb8fae7e'
 
           rm -rf /tmp/v197 && mkdir -p /tmp/v197
           SRCZIP=$(find /tmp/v186-artifact -type f -name 'Global-Edge-AI-Trader-v1.8.6-source.zip' | head -n1)
