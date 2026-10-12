@@ -73,6 +73,16 @@ jobs:
           cd /tmp/v197
           patch -p4 --batch --verbose < /tmp/v187.patch
 
+          # Kotlin API compatibility for bootstrap callers after fastMode was added.
+          python - <<'PY'
+          from pathlib import Path
+          p=Path("app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt")
+          s=p.read_text()
+          s=s.replace("scanGlobalLead(progress)", "scanGlobalLead(progress=progress)")
+          s=s.replace("scanAll(progress)", "scanAll(progress=progress)")
+          p.write_text(s)
+          PY
+
       - name: Verify v1.8.7 architecture
         working-directory: /tmp/v197
         shell: bash
@@ -95,6 +105,8 @@ jobs:
           grep -q 'withTimeout(95_000L)' app/src/main/java/com/suhas/ucsentinel/worker/MarketScanService.kt
           grep -q 'scanTradingStrategies(fastMode=true)' app/src/main/java/com/suhas/ucsentinel/worker/MarketScanService.kt
           grep -q 'deepBudget=if(fastMode)60 else 220' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
+          grep -q 'scanGlobalLead(progress=progress)' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
+          grep -q 'scanAll(progress=progress)' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
           grep -q 'delay(20_000L)' app/src/main/java/com/suhas/ucsentinel/worker/MarketScanService.kt
           grep -q '>=6L\*60_000L' app/src/main/java/com/suhas/ucsentinel/worker/ScanWorker.kt
 
