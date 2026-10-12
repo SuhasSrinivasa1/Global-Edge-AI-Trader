@@ -47,16 +47,22 @@ jobs:
         run: |
           set -euo pipefail
           tr -d '\r\n ' < signing-repo/fresh-global-edge/v197/v186-to-v187.patch.gz.b64 | base64 -d > /tmp/v187.patch.gz
-          test "$(sha256sum /tmp/v187.patch.gz | awk '{print $1}')" = 'd08c55315c6f79933572ff1f718606224299ccfc414c2fa3682ee73939ef70bf'
+          GZ_SHA=$(sha256sum /tmp/v187.patch.gz | awk '{print $1}')
+          echo "v1.8.7 gzip sha=$GZ_SHA"
+          test "$GZ_SHA" = 'd08c55315c6f79933572ff1f718606224299ccfc414c2fa3682ee73939ef70bf'
           gunzip -c /tmp/v187.patch.gz > /tmp/v187.patch
-          test "$(sha256sum /tmp/v187.patch | awk '{print $1}')" = '6224247452695fad16b8e052382bb8486eede7118dd5baee7ec0a1b3cb8fae7e'
+          PATCH_SHA=$(sha256sum /tmp/v187.patch | awk '{print $1}')
+          echo "v1.8.7 patch sha=$PATCH_SHA"
+          test "$PATCH_SHA" = '6224247452695fad16b8e052382bb8486eede7118dd5baee7ec0a1b3cb8fae7e'
 
           rm -rf /tmp/v197 && mkdir -p /tmp/v197
           SRCZIP=$(find /tmp/v186-artifact -type f -name 'Global-Edge-AI-Trader-v1.8.6-source.zip' | head -n1)
+          echo "v1.8.6 source=$SRCZIP"
           test -n "$SRCZIP" && test -s "$SRCZIP"
+          sha256sum "$SRCZIP"
           unzip -q "$SRCZIP" -d /tmp/v197
           cd /tmp/v197
-          patch -p4 --batch < /tmp/v187.patch
+          patch -p4 --batch --verbose < /tmp/v187.patch
 
       - name: Verify v1.8.7 architecture
         working-directory: /tmp/v197
