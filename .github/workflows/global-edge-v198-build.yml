@@ -1,0 +1,205 @@
+name: Global Edge AI Trader v1.8.8 Keepalive Build
+
+on:
+  push:
+    paths:
+      - '.github/workflows/global-edge-v198-build.yml'
+      - 'BUILD-V198.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-sign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+    steps:
+      - name: Checkout canonical repository
+        uses: actions/checkout@v4
+        with:
+          path: canonical-build
+
+      - name: Checkout patch/signing repository
+        uses: actions/checkout@v4
+        with:
+          repository: SuhasSrinivasa1/AI-Trader
+          ref: main
+          path: signing-repo
+          persist-credentials: false
+
+      - name: Recover verified v1.8.7 source
+        uses: actions/download-artifact@v4
+        with:
+          name: Global-Edge-AI-Trader-v1.8.7-FINAL
+          repository: SuhasSrinivasa1/Global-Edge-AI-Trader
+          run-id: 38239010039
+          github-token: ${{ github.token }}
+          path: /tmp/v187-artifact
+
+      - name: Reconstruct and apply v1.8.8 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat signing-repo/fresh-global-edge/v198/patch.part00 \
+              signing-repo/fresh-global-edge/v198/patch.part01 \
+              signing-repo/fresh-global-edge/v198/patch.part02 \
+              signing-repo/fresh-global-edge/v198/patch.part03 \
+              signing-repo/fresh-global-edge/v198/patch.part04 > /tmp/v188.patch.gz.b64
+          test "$(wc -c < /tmp/v188.patch.gz.b64)" = '9172'
+          base64 -d /tmp/v188.patch.gz.b64 > /tmp/v188.patch.gz
+          test "$(sha256sum /tmp/v188.patch.gz | awk '{print $1}')" = '07267b776f0cfbb5d744392b89f73380e9f083c7b5d2526869d330ab3356b4d9'
+          gunzip -c /tmp/v188.patch.gz > /tmp/v188.patch
+          test "$(sha256sum /tmp/v188.patch | awk '{print $1}')" = '41fcf5728513f4b0bf5897bb48c934e038089396b0adbc86a2234f2cabbea056'
+
+          rm -rf /tmp/v198 && mkdir -p /tmp/v198
+          SRCZIP=$(find /tmp/v187-artifact -type f -name 'Global-Edge-AI-Trader-v1.8.7-source.zip' | head -n1)
+          test -n "$SRCZIP" && test -s "$SRCZIP"
+          unzip -q "$SRCZIP" -d /tmp/v198
+          cd /tmp/v198
+          patch -p1 --batch < /tmp/v188.patch
+
+      - name: Verify v1.8.8 keepalive architecture
+        working-directory: /tmp/v198
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionCode = 198' app/build.gradle.kts
+          grep -q 'versionName = "1.8.8"' app/build.gradle.kts
+          grep -q 'android.permission.WAKE_LOCK' app/src/main/AndroidManifest.xml
+          grep -q 'android.permission.SCHEDULE_EXACT_ALARM' app/src/main/AndroidManifest.xml
+          grep -q 'android:stopWithTask="false"' app/src/main/AndroidManifest.xml
+          grep -q 'android.intent.action.USER_PRESENT' app/src/main/AndroidManifest.xml
+          grep -q 'PARTIAL_WAKE_LOCK' app/src/main/java/com/suhas/ucsentinel/worker/MarketScanService.kt
+          grep -q 'delay(15_000L)' app/src/main/java/com/suhas/ucsentinel/worker/MarketScanService.kt
+          grep -q 'scheduleRecovery(this,15_000L)' app/src/main/java/com/suhas/ucsentinel/worker/MarketScanService.kt
+          grep -q 'scheduleRecovery(this,5_000L)' app/src/main/java/com/suhas/ucsentinel/worker/MarketScanService.kt
+          grep -q 'PULSE_MS = 2L \* 60_000L' app/src/main/java/com/suhas/ucsentinel/worker/MarketGuardianScheduler.kt
+          grep -q 'setExactAndAllowWhileIdle' app/src/main/java/com/suhas/ucsentinel/worker/MarketGuardianScheduler.kt
+          grep -q 'force_market_pass" to true' app/src/main/java/com/suhas/ucsentinel/worker/MarketGuardianScheduler.kt
+          grep -q 'SERVICE_HEARTBEAT_FRESH_MS=90_000L' app/src/main/java/com/suhas/ucsentinel/domain/engine/AutomationPolicy.kt
+          grep -q 'requestExactAlarmAccess' app/src/main/java/com/suhas/ucsentinel/BatteryOptimizationHelper.kt
+          grep -q 'marketWindow' app/src/main/java/com/suhas/ucsentinel/worker/BootReceiver.kt
+          grep -q 'schedulerPrefs.edit().putInt("version",188)' app/src/main/java/com/suhas/ucsentinel/GlobalEdgeApplication.kt
+
+          # Preserve v1.8.7 quality/reliability controls.
+          grep -q 'withTimeout(95_000L)' app/src/main/java/com/suhas/ucsentinel/worker/MarketScanService.kt
+          grep -q 'deepBudget=if(fastMode)60 else 220' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
+          grep -q 'setup.expectedR>=0.10' app/src/main/java/com/suhas/ucsentinel/data/repository/UCSentinelRepository.kt
+          grep -q '3 PM UC — TOP 5 RESEARCH' app/src/main/java/com/suhas/ucsentinel/ui/InformationArchitectureScreens.kt
+          echo 'v1.8.8 keepalive verification passed'
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Unit tests and release APK
+        working-directory: /tmp/v198
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p out
+          gradle --no-daemon --console=plain clean testDebugUnitTest assembleRelease 2>&1 | tee out/GRADLE-BUILD-TEST.log
+          echo 'Unit tests + assembleRelease: PASS' > out/TEST-RESULT-SUMMARY.txt
+
+      - name: Recover preserved signing material
+        uses: actions/download-artifact@v4
+        with:
+          name: Global-Edge-AI-Trader-v1.5.0-FINAL
+          repository: SuhasSrinivasa1/AI-Trader
+          run-id: 36146076154
+          github-token: ${{ github.token }}
+          path: /tmp/v150-artifact
+
+      - name: Sign and verify update APK
+        working-directory: /tmp/v198
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out /tmp/signing
+          BACKUP=$(find /tmp/v150-artifact -type f -name 'Global-Edge-AI-Trader-v1.5.0-SIGNING-BACKUP.zip' | head -n1)
+          test -n "$BACKUP" && test -s "$BACKUP"
+          unzip -q "$BACKUP" -d /tmp/signing
+          STORE_PASS=$(grep '^store_password=' /tmp/signing/SIGNING-INFO.txt | cut -d= -f2-)
+          KEY_PASS=$(grep '^key_password=' /tmp/signing/SIGNING-INFO.txt | cut -d= -f2-)
+          UNSIGNED=$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*release*.apk' | head -n1)
+          OUT=out/Global-Edge-AI-Trader-v1.8.8.apk
+
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks /tmp/signing/global-edge-v1.5.0.keystore \
+            --ks-pass pass:"$STORE_PASS" \
+            --key-pass pass:"$KEY_PASS" \
+            --ks-key-alias globaledge \
+            --out "$OUT" "$UNSIGNED"
+
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$OUT" | tee out/APK-SIGNATURE-VERIFY.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$OUT" | tee out/APK-BADGING.txt
+
+          grep -q "package: name='com.suhas.globaledgeai'" out/APK-BADGING.txt
+          grep -q "versionCode='198'" out/APK-BADGING.txt
+          grep -q "versionName='1.8.8'" out/APK-BADGING.txt
+
+          CERT_SHA=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$OUT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n1)
+          test "$CERT_SHA" = '31ffa51c23b76f450cf099d00b254870bf8eacc5ce79aee4458070a0fab783d7'
+          sha256sum "$OUT" | tee out/SHA256.txt
+
+          {
+            echo 'build=SUCCESS'
+            echo 'base=Global-Edge-AI-Trader-v1.8.7-FINAL'
+            echo 'package=com.suhas.globaledgeai'
+            echo 'versionCode=198'
+            echo 'versionName=1.8.8'
+            echo "signer_sha256=$CERT_SHA"
+            echo 'independent_heartbeat_seconds=15'
+            echo 'market_cpu_wakelock=true'
+            echo 'guardian_pulse_minutes=2'
+            echo 'exact_alarm_when_allowed=true'
+            echo 'emergency_recovery_on_destroy_seconds=15'
+            echo 'emergency_recovery_on_task_removed_seconds=5'
+            echo 'boot_user_present_recovery=true'
+            echo 'heartbeat_stale_seconds=90'
+            echo 'network_ping=false'
+            echo 'v187_quality_controls_preserved=true'
+          } > out/BUILD-STATUS.txt
+
+      - name: Package source and logs
+        working-directory: /tmp/v198
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -qr out/Global-Edge-AI-Trader-v1.8.8-source.zip . -x '.git/*' '*/.gradle/*' '*/build/*' 'out/*' '*.keystore' '*.jks'
+          cd out
+          zip -q Global-Edge-AI-Trader-v1.8.8-build-logs.zip \
+            APK-SIGNATURE-VERIFY.txt APK-BADGING.txt SHA256.txt BUILD-STATUS.txt \
+            TEST-RESULT-SUMMARY.txt GRADLE-BUILD-TEST.log
+
+      - name: Upload final v1.8.8 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Global-Edge-AI-Trader-v1.8.8-FINAL
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            /tmp/v198/out/Global-Edge-AI-Trader-v1.8.8.apk
+            /tmp/v198/out/Global-Edge-AI-Trader-v1.8.8-source.zip
+            /tmp/v198/out/Global-Edge-AI-Trader-v1.8.8-build-logs.zip
+            /tmp/v198/out/BUILD-STATUS.txt
