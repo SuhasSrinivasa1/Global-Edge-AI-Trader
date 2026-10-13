@@ -64,6 +64,16 @@ jobs:
           cd /tmp/v198
           patch -p1 --batch < /tmp/v188.patch
 
+          # v1.8.8 intentionally tightens heartbeat freshness from 3 minutes to 90 seconds.
+          python - <<'PY'
+          from pathlib import Path
+          p=Path("app/src/test/java/com/suhas/globaledgeai/domain/engine/AutomationPolicyTest.kt")
+          s=p.read_text()
+          s=s.replace("assertTrue(AutomationPolicy.serviceHeartbeatFresh(now,now-120_000L))", "assertTrue(AutomationPolicy.serviceHeartbeatFresh(now,now-60_000L))")
+          s=s.replace("assertFalse(AutomationPolicy.serviceHeartbeatFresh(now,now-240_000L))", "assertFalse(AutomationPolicy.serviceHeartbeatFresh(now,now-120_000L))")
+          p.write_text(s)
+          PY
+
       - name: Verify v1.8.8 keepalive architecture
         working-directory: /tmp/v198
         shell: bash
@@ -83,6 +93,8 @@ jobs:
           grep -q 'setExactAndAllowWhileIdle' app/src/main/java/com/suhas/ucsentinel/worker/MarketGuardianScheduler.kt
           grep -q 'force_market_pass" to true' app/src/main/java/com/suhas/ucsentinel/worker/MarketGuardianScheduler.kt
           grep -q 'SERVICE_HEARTBEAT_FRESH_MS=90_000L' app/src/main/java/com/suhas/ucsentinel/domain/engine/AutomationPolicy.kt
+          grep -q 'now-60_000L' app/src/test/java/com/suhas/globaledgeai/domain/engine/AutomationPolicyTest.kt
+          grep -q 'now-120_000L' app/src/test/java/com/suhas/globaledgeai/domain/engine/AutomationPolicyTest.kt
           grep -q 'requestExactAlarmAccess' app/src/main/java/com/suhas/ucsentinel/BatteryOptimizationHelper.kt
           grep -q 'marketWindow' app/src/main/java/com/suhas/ucsentinel/worker/BootReceiver.kt
           grep -q 'schedulerPrefs.edit().putInt("version",188)' app/src/main/java/com/suhas/ucsentinel/GlobalEdgeApplication.kt
